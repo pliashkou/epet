@@ -2,6 +2,9 @@
 #include "epet_dynpage.h"
 #include "epet_vm.h"
 #include "epet_species.h"
+
+/* One growth-stage record on the wire: see epet_modblob.h. */
+#define STAGE_SZ 6
 #include <stdlib.h>
 #include <string.h>
 
@@ -59,6 +62,7 @@ typedef struct {
     epet_palette_t  *bd_pals;
     char           (*bd_names)[12];
     epet_species_t  *species;
+    epet_growth_t   *stages;
     const epet_species_t **species_ptrs;
     char           (*sp_names)[12];
     char           (*sp_blurbs)[28];
@@ -139,6 +143,10 @@ epet_blob_result_t epet_modblob_parse(const uint8_t *d, size_t len,
     const uint8_t n_bd = d[48], n_species = d[49], n_pages = d[50];
     const uint8_t n_vmpages = d[51];
     const uint8_t n_hooks = d[60];
+    /* Byte 61 was reserved, so a pack built before growth existed reads
+     * as n_stages = 0 and parses exactly as it always did. No version
+     * bump, no compatibility check, nothing to rebuild. */
+    const uint8_t n_stages = d[61];
     const uint32_t paylen = rd32(d + 52);
     const uint32_t want_crc = rd32(d + 56);
 
@@ -221,6 +229,13 @@ epet_blob_result_t epet_modblob_parse(const uint8_t *d, size_t len,
         off += (size_t)n_hooks * 8;
     }
 
+    size_t stage_start = 0;
+    if (n_stages) {
+        if (off + (size_t)n_stages * STAGE_SZ > paylen) return EPET_BLOB_BOUNDS;
+        stage_start = off;
+        off += (size_t)n_stages * STAGE_SZ;
+    }
+
     /* ---- allocate one block ------------------------------------------ */
     #define ALIGN8(x) (((x) + 7u) & ~(size_t)7u)
     size_t need = ALIGN8(sizeof(loaded_t));
@@ -245,6 +260,7 @@ epet_blob_result_t epet_modblob_parse(const uint8_t *d, size_t len,
     size_t o_vmpg   = need;        need += ALIGN8(n_vmpages * sizeof(epet_vmpage_t));
     size_t o_hooks  = need;        need += ALIGN8(n_hooks * sizeof(epet_vmhook_t));
     size_t o_globs  = need;        need += ALIGN8(EPET_VM_GLOBALS * sizeof(int32_t));
+    size_t o_stages = need;        need += ALIGN8(n_stages * sizeof(epet_growth_t));
 
     uint8_t *blk = calloc(1, need);
     if (!blk) return EPET_BLOB_MEMORY;
@@ -357,6 +373,43 @@ epet_blob_result_t epet_modblob_parse(const uint8_t *d, size_t len,
         L->species[i].poop        = (poopf < n_frames) ? &L->frames[poopf] : 0;
         L->species_ptrs[i] = &L->species[i];
         off += SP_SZ;
+    }
+
+    /* Growth stages. Each record names its own species, so the species
+     * record keeps the size it has always had and an old pack stays
+     * readable. Records are grouped by species and ordered by from_age;
+     * anything else is rejected rather than quietly mis-drawn. */
+    if (n_stages) {
+        L->stages = (epet_growth_t *)(blk + o_stages);
+        off = stage_start;
+        int prev_sp = -1, prev_age = -1;
+        for (uint8_t i = 0; i < n_stages; i++) {
+            uint8_t spi     = pay[off];
+            uint8_t fromage = pay[off + 1];
+            uint16_t pct    = rd16(pay + off + 2);
+            uint8_t pose0   = pay[off + 4], npo = pay[off + 5];
+
+            if (spi >= n_species || fromage < 1 || fromage > EPET_AGE_MAX ||
+                (size_t)pose0 + npo > n_poses) {
+                free(blk); return EPET_BLOB_BOUNDS;
+            }
+            if (spi == prev_sp) {
+                if ((int)fromage <= prev_age) { free(blk); return EPET_BLOB_BOUNDS; }
+            } else if (spi < prev_sp) {
+                free(blk); return EPET_BLOB_BOUNDS;        /* not grouped */
+            } else {
+                L->species[spi].stages = &L->stages[i];
+            }
+            L->species[spi].n_stages++;
+
+            L->stages[i].from_age  = fromage;
+            L->stages[i].scale_pct = pct;
+            L->stages[i].poses     = npo ? L->poses + pose0 : 0;
+            L->stages[i].n_poses   = npo;
+
+            prev_sp = spi; prev_age = fromage;
+            off += STAGE_SZ;
+        }
     }
 
     off = pg_start;

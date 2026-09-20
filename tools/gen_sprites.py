@@ -541,9 +541,70 @@ BACKDROPS = {
 
 # ---- pose construction --------------------------------------------------
 
-def build(body_fn):
+# ---- growth stages ------------------------------------------------------
+#
+# A creature's age level runs 1..50 (EPET_AGE_MAX). These are the stages the
+# built-in species grow through: each sets a SIZE on screen and reshapes the
+# body, so a baby reads as a baby rather than as a small adult.
+#
+# scale_pct is the on-screen size, 100 = one sprite pixel per screen pixel.
+# The old fixed look was 200. The ceiling is set by the canvas and the ground
+# line -- see assert_fits_panel() below, which fails the build rather than
+# letting a big pet grow up into the status bar.
+#
+# The morph reshapes the SAME drawing code rather than requiring a second set
+# of hand-drawn poses; every pose a stage owns comes out consistent for free.
+GROWTH = [
+    # key      from_age  scale_pct  morph
+    ("baby",   1,        130,  dict(sx=0.80, sy=0.84, dy=4, spread=0.75,
+                                    feet=False)),
+    ("teen",   9,        205,  dict()),
+    ("adult",  20,       290,  dict(sx=1.06, sy=1.04, spread=1.1)),
+    ("elder",  38,       285,  dict(sx=1.08, sy=0.84, dy=3, spread=1.1)),
+]
+
+# Which stage's art a species reports as its own. Pages and the CLASS page's
+# preview draw at the base scale, where the grown form is what reads as "this
+# is a BLOB" -- a baby is the least recognisable thing a species has.
+BASE_STAGE = "adult"
+
+
+def morphed(body_fn, morph):
+    """Wrap frame() so a stage reshapes every pose it owns identically."""
+    sx     = morph.get("sx", 1.0)
+    sy     = morph.get("sy", 1.0)
+    dy     = morph.get("dy", 0)
+    sspr   = morph.get("spread", 1.0)
+    nofeet = morph.get("feet", True) is False
+
+    def f(_body, cx=22, cy=24, rx=16, ry=15, eye_y=None, mouth_y=None,
+          spread=9, feet=True, **kw):
+        # Scale the radii rather than offsetting them, so the tiny early
+        # frames of "birth" stay in proportion instead of collapsing.
+        rx = max(2, int(round(rx * sx)))
+        ry = max(2, int(round(ry * sy)))
+        cy += dy
+        # eye_y/mouth_y are absolute when given (the dead pose pins them), so
+        # they have to follow the body down or the face detaches from it.
+        if eye_y is not None:
+            eye_y += dy
+        if mouth_y is not None:
+            mouth_y += dy
+        spread = max(3, int(round(spread * sspr)))
+        return frame(_body, cx=cx, cy=cy, rx=rx, ry=ry, eye_y=eye_y,
+                     mouth_y=mouth_y, spread=spread,
+                     feet=False if nofeet else feet, **kw)
+
+    # build()'s pose definitions all call frame(body_fn, ...) with the body
+    # function positional. The wrapper already closes over it, so accept and
+    # discard that argument instead of editing thirty call sites.
+    return lambda _bound_body=None, **kw: f(body_fn, **kw)
+
+
+def build(body_fn, morph=None):
     """Return {pose_name: [(canvas, hold_ms), ...]}"""
     poses = {}
+    frame = morphed(body_fn, morph or {})       # shadows the global on purpose
 
     # idle: breathe, breathe, blink
     poses["idle"] = [
@@ -624,6 +685,29 @@ def assert_not_clipped(name, cv):
             "clipped; raise H/W or lower BODY_DY" % (name, ",".join(edges), len(bad)))
 
 
+def assert_fits_panel(name, cv, scale_pct):
+    """A stage sets its own on-screen size, and the main screen anchors the
+    sprite by its feet on a fixed ground line. Too large and the creature
+    grows up through the status bar -- which looks like a rendering bug, not
+    like a big pet. Catch it here rather than on the device.
+
+    Mirrors epet_render.c: PET_GROUND is the bottom edge, PANEL_H the bar."""
+    PET_GROUND, PANEL_H, SCREEN_H = 212, 18, 240
+
+    rows = [y for y in range(cv.h) if any(cv.get(x, y) for x in range(cv.w))]
+    if not rows:
+        return
+    s = scale_pct / 100.0
+    top    = PET_GROUND - cv.h * s + rows[0] * s
+    bottom = PET_GROUND - cv.h * s + (rows[-1] + 1) * s
+    if top < PANEL_H or bottom > SCREEN_H:
+        raise SystemExit(
+            "sprite %s at scale %d%% spans y=%.0f..%.0f, outside the "
+            "%d..%d the main screen leaves for the pet -- lower scale_pct "
+            "in GROWTH or raise PET_GROUND"
+            % (name, scale_pct, top, bottom, PANEL_H, SCREEN_H))
+
+
 def emit_frame(name, cv, out):
     n = cv.w * cv.h
     out.append("static const uint8_t %s[%d] = {" % (name, n))
@@ -697,26 +781,40 @@ def main():
 
         emit_frame("poop_%s" % ident, POOPS[ident](), out)
 
-        poses = build(body_fn)
-        for pname in pose_order:
-            for i, (cv, hold) in enumerate(poses[pname]):
-                fname = "%s_%s_%d" % (ident, pname, i)
-                assert_not_clipped(fname, cv)
-                emit_frame(fname, cv, out)
+        # One full pose set per growth stage. The morph reshapes the same
+        # drawing code, so a stage costs authoring effort only where the
+        # proportions actually differ.
+        for skey, _from_age, spct, morph in GROWTH:
+            poses = build(body_fn, morph)
+            for pname in pose_order:
+                for i, (cv, hold) in enumerate(poses[pname]):
+                    fname = "%s_%s_%s_%d" % (ident, skey, pname, i)
+                    assert_not_clipped(fname, cv)
+                    assert_fits_panel(fname, cv, spct)
+                    emit_frame(fname, cv, out)
 
-        for pname in pose_order:
-            keys = poses[pname]
-            out.append("static const epet_key_t K_%s_%s[] = {" % (ident, pname))
-            for i, (_, hold) in enumerate(keys):
-                out.append("    { &F_%s_%s_%d, %d }," % (ident, pname, i, hold))
+            for pname in pose_order:
+                keys = poses[pname]
+                out.append("static const epet_key_t K_%s_%s_%s[] = {"
+                           % (ident, skey, pname))
+                for i, (_, hold) in enumerate(keys):
+                    out.append("    { &F_%s_%s_%s_%d, %d },"
+                               % (ident, skey, pname, i, hold))
+                out.append("};")
+            out.append("")
+
+            out.append("static const epet_pose_t P_%s_%s[] = {" % (ident, skey))
+            for pname in pose_order:
+                loop = "true" if pname in ("idle", "sad", "dead") else "false"
+                out.append('    { "%s", K_%s_%s_%s, %d, %s },'
+                           % (pname, ident, skey, pname, len(poses[pname]), loop))
             out.append("};")
-        out.append("")
+            out.append("")
 
-        out.append("static const epet_pose_t P_%s[] = {" % ident)
-        for pname in pose_order:
-            loop = "true" if pname in ("idle", "sad", "dead") else "false"
-            out.append('    { "%s", K_%s_%s, %d, %s },'
-                       % (pname, ident, pname, len(poses[pname]), loop))
+        out.append("static const epet_growth_t G_%s[] = {" % ident)
+        for skey, from_age, spct, _morph in GROWTH:
+            out.append("    { %d, %d, P_%s_%s, %d },   /* %s */"
+                       % (from_age, spct, ident, skey, len(pose_order), skey))
         out.append("};")
         out.append("")
 
@@ -725,13 +823,15 @@ def main():
         out.append('    .blurb = "%s",' % blurb)
         out.append("    .palette = { { %s } },"
                    % ", ".join("0x%04X" % swap16(c) for c in pal))
-        out.append("    .poses = P_%s," % ident)
+        out.append("    .poses = P_%s_%s," % (ident, BASE_STAGE))
         out.append("    .n_poses = %d," % len(pose_order))
         out.append("    .scale = %d," % SCALE)
         out.append("    .backdrops = BD_%s," % ident)
         out.append("    .n_backdrops = %d," % len(BACKDROPS[ident]))
         out.append("    .poop = &F_poop_%s," % ident)
         out.append("    .temper = { %.2ff, %.2ff, %.2ff, %.2ff }," % temper)
+        out.append("    .stages = G_%s," % ident)
+        out.append("    .n_stages = %d," % len(GROWTH))
         out.append("};")
         out.append("")
 

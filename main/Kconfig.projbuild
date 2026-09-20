@@ -48,6 +48,20 @@ menu "epet configuration"
             the pet unobstructed. LT or LB brings it back; that reveal press
             is consumed, so it never also moves the cursor or opens a page.
 
+    config EPET_AGE_LEVEL_MS
+        int "How long one age level lasts (ms)"
+        default 3000
+        range 100 3600000
+        help
+            A pet's age level runs 1 to 50 and decides how big it is drawn on
+            the main screen and which of its species' growth stages it wears.
+            Age itself keeps climbing past level 50; it just stops changing
+            how the pet looks.
+
+            The default fits a whole childhood inside the fast development
+            tuning of the decay rates. Raise it alongside those rates for real
+            play, or a pet reaches old age in two and a half minutes.
+
     config EPET_AUTOSAVE_MS
         int "Minimum gap between automatic saves (ms)"
         default 30000

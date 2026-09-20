@@ -24,7 +24,11 @@ static const bool NONE[EPET_BTN_COUNT] = {false};
 
 /* ---- in-memory store -------------------------------------------------- */
 #define SLOTS 8
-static struct { char key[24]; uint8_t buf[70000]; size_t len; bool used; } mem[SLOTS];
+/* Sized off the real cap rather than a round number: a pack carrying growth
+ * artwork is several times the size of one that does not, and this quietly
+ * became too small the moment stages were added. */
+static struct { char key[24]; uint8_t buf[EPET_PACK_MAX_BYTES]; size_t len;
+                bool used; } mem[SLOTS];
 static bool m_read(void *c, const char *k, void *b, size_t *l) {
     (void)c;
     for (int i=0;i<SLOTS;i++) if (mem[i].used && !strcmp(mem[i].key,k)) {

@@ -40,7 +40,12 @@ uint8_t epet_restore_modules(epet_bus_t *bus);
  * A pack installed from a browser is stored whole, keyed by its id, and
  * re-parsed on boot. That is what makes a loaded sub-program survive a
  * restart. */
-#define EPET_PACK_MAX_BYTES 65536
+/* A pack with growth artwork carries several pose sets, so the old 64 KB
+ * ceiling is no longer generous. The receive buffer is a single malloc, and
+ * with CONFIG_SPIRAM_USE_MALLOC and a 16 KB internal threshold an allocation
+ * this size lands in the 8 MB PSRAM rather than in the scarce internal heap.
+ * NVS holds the stored copy, and the partition is 512 KB. */
+#define EPET_PACK_MAX_BYTES 196608
 
 bool    epet_save_pack(const char *id, const uint8_t *data, size_t len);
 bool    epet_erase_pack(const char *id);

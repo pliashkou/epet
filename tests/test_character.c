@@ -317,6 +317,162 @@ int main(void)
     CHECK(strcmp(epet_actor_pose_name(&pet.actor), EPET_POSE_BIRTH) == 0,
           "adopting should replay birth");
 
+    printf("fractional blitter\n");
+    {
+        /* epet_blit_q8() replaced the integer blitter on the main screen on
+         * the promise that it is identical at whole-number scales. That is a
+         * claim about output, so check the output rather than trusting the
+         * arithmetic. */
+        static uint16_t a[EPET_W * EPET_H], b[EPET_W * EPET_H];
+        const epet_species_t *sp = epet_species_builtin(0);
+        const epet_pose_t *po = epet_species_pose(sp, EPET_POSE_IDLE);
+        const epet_frame_t *f = po->keys[0].frame;
+
+        for (int sc = 1; sc <= 3; sc++) {
+            memset(a, 0, sizeof a);
+            memset(b, 0, sizeof b);
+            epet_blit(a, 20, 30, f, &sp->palette, sc);
+            epet_blit_q8(b, 20, 30, f, &sp->palette, sc * 256);
+            CHECK(memcmp(a, b, sizeof a) == 0,
+                  "q8 blit differs from the integer blit at scale %d", sc);
+        }
+
+        /* A fractional scale must land between the two integer sizes, or the
+         * ramp is not actually doing anything. */
+        int w2 = (f->w * 512) >> 8, w3 = (f->w * 768) >> 8;
+        int wf = (f->w * 640) >> 8;
+        CHECK(wf > w2 && wf < w3,
+              "1.5x width %d should sit between %d and %d", wf, w2, w3);
+
+        /* Clipping: drawing partly off each edge must not corrupt memory or
+         * wrap onto the opposite side of the framebuffer. */
+        memset(b, 0, sizeof b);
+        epet_blit_q8(b, -30, -20, f, &sp->palette, 700);
+        epet_blit_q8(b, EPET_W - 5, EPET_H - 5, f, &sp->palette, 700);
+        for (int y = 0; y < EPET_H; y++) {
+            CHECK(!(b[y * EPET_W + EPET_W - 1] && b[y * EPET_W]),
+                  "row %d looks wrapped", y);
+        }
+    }
+
+    printf("growth\n");
+    {
+        const epet_species_t *sp = epet_species_builtin(0);
+        CHECK(sp->n_stages > 0, "a built-in species should declare stages");
+
+        /* Stages must be ordered and in range, or resolution silently picks
+         * the wrong one for part of the age range. */
+        for (uint8_t i = 0; i < sp->n_stages; i++) {
+            CHECK(sp->stages[i].from_age >= 1 &&
+                  sp->stages[i].from_age <= EPET_AGE_MAX,
+                  "stage %u starts at age %u, outside 1..%d",
+                  i, sp->stages[i].from_age, EPET_AGE_MAX);
+            if (i) CHECK(sp->stages[i].from_age > sp->stages[i - 1].from_age,
+                         "stage %u starts before stage %u", i, i - 1);
+        }
+
+        /* Every age level resolves to something drawable, including the ends
+         * and beyond the top. */
+        for (int age = 0; age <= EPET_AGE_MAX + 5; age++) {
+            const epet_pose_t *po =
+                epet_species_pose_at(sp, (uint8_t)age, EPET_POSE_IDLE);
+            CHECK(po && po->n_keys, "age %d has no idle pose", age);
+            int q8 = epet_species_scale_q8_at(sp, (uint8_t)age);
+            CHECK(q8 > 0, "age %d has a non-positive scale", age);
+        }
+
+        /* The size must actually change, and never shrink with age -- a ramp
+         * that went backwards would read as the pet withering. */
+        int first = epet_species_scale_q8_at(sp, 1);
+        int last  = epet_species_scale_q8_at(sp, EPET_AGE_MAX);
+        CHECK(last > first, "a grown pet should be bigger: %d -> %d", first, last);
+        int prev = 0, distinct = 0;
+        for (int age = 1; age <= EPET_AGE_MAX; age++) {
+            int q8 = epet_species_scale_q8_at(sp, (uint8_t)age);
+            if (age > 1) CHECK(q8 >= prev - 32,
+                               "size fell sharply from age %d to %d", age - 1, age);
+            if (q8 != prev) distinct++;
+            prev = q8;
+        }
+        CHECK(distinct > sp->n_stages,
+              "the ramp should give more sizes (%d) than there are stages (%u)",
+              distinct, sp->n_stages);
+
+        /* Growth stops at the top rather than running away. */
+        CHECK(epet_species_scale_q8_at(sp, EPET_AGE_MAX) ==
+              epet_species_scale_q8_at(sp, 250),
+              "age past the maximum must not keep growing");
+
+        /* An unknown pose still resolves, at every age. */
+        CHECK(epet_species_pose_at(sp, 1, "nosuchpose") != NULL,
+              "an unknown pose must fall back, not return NULL");
+
+        /* A species with no stages at all keeps working at its base scale. */
+        epet_species_t bare = *sp;
+        bare.stages = NULL; bare.n_stages = 0;
+        CHECK(epet_species_scale_q8_at(&bare, 1) == sp->scale * 256,
+              "a species without stages should use its base scale");
+        CHECK(epet_species_scale_q8_at(&bare, EPET_AGE_MAX) == sp->scale * 256,
+              "a species without stages should never change size");
+    }
+
+    printf("ageing\n");
+    {
+        epet_init(&pet);
+        pet.display_timeout_ms = 0;
+        CHECK(epet_age_level(&pet) == 1, "a newborn is age 1, got %u",
+              epet_age_level(&pet));
+
+        /* The actor has to be TOLD the age; if the wiring in epet_update()
+         * is lost the pet silently never grows, which is exactly the kind of
+         * thing that looks fine in a screenshot. */
+        uint8_t a0 = pet.actor.age;
+        for (int i = 0; i < 600; i++) epet_update(&pet, 50, NONE, NONE);
+        CHECK(pet.actor.age > a0,
+              "the actor's age should follow the pet's, %u -> %u",
+              a0, pet.actor.age);
+        CHECK(pet.actor.age == epet_age_level(&pet),
+              "actor age %u should match the pet's level %u",
+              pet.actor.age, epet_age_level(&pet));
+
+        /* It clamps rather than wrapping: age_ms is 32-bit milliseconds, so
+         * a long-lived pet would otherwise index past the stage table. */
+        pet.age_ms = 0xFFFFFFFFu;
+        CHECK(epet_age_level(&pet) == EPET_AGE_MAX,
+              "a very old pet should clamp to %d, got %u",
+              EPET_AGE_MAX, epet_age_level(&pet));
+
+        /* A rebirth starts over. */
+        epet_init(&pet);
+        CHECK(epet_age_level(&pet) == 1, "a new creature starts at age 1");
+    }
+
+    printf("growing mid-animation\n");
+    {
+        /* Crossing a stage boundary must not restart the animation: the pose
+         * is re-resolved in the new stage but keeps its frame and phase. */
+        epet_init(&pet);
+        pet.display_timeout_ms = 0;
+        const epet_species_t *sp = pet.species;
+        uint8_t boundary = sp->n_stages > 1 ? sp->stages[1].from_age : 2;
+
+        pet.actor.age = (uint8_t)(boundary - 1);
+        epet_actor_play(&pet.actor, EPET_POSE_IDLE, 0);
+        epet_actor_tick(&pet.actor, 950);          /* land on a later frame */
+        uint8_t key_before = pet.actor.key;
+        const epet_pose_t *pose_before = pet.actor.pose;
+
+        epet_actor_set_age(&pet.actor, boundary);
+        CHECK(pet.actor.key == key_before,
+              "growing up mid-pose should keep the frame index, %u -> %u",
+              key_before, pet.actor.key);
+        CHECK(strcmp(epet_actor_pose_name(&pet.actor), EPET_POSE_IDLE) == 0,
+              "growing up should keep playing the same pose");
+        if (sp->n_stages > 1 && sp->stages[1].poses)
+            CHECK(pet.actor.pose != pose_before,
+                  "a stage with its own art should swap the pose data");
+    }
+
     printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);
     return failures ? 1 : 0;
 }

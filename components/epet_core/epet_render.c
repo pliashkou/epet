@@ -8,9 +8,11 @@
 
 #define PANEL_H   18
 #define PET_CX    (EPET_W / 2)
-/* Sprites carry headroom above the body (SPROUT's leaf), so the centre
- * sits lower than the visual middle to keep the feet on the ground. */
-#define PET_CY    156
+/* The pet is anchored by its FEET, not its centre, because it changes size
+ * as it ages. PET_GROUND is where the bottom edge of the sprite sits; at the
+ * old fixed scale of 2 that is the same place the old centre of 156 put it,
+ * so a young pet looks exactly as it always did. */
+#define PET_GROUND 212
 #define PET_R     44
 
 /* One line for all five needs. At 240px the labels have to be single
@@ -30,18 +32,24 @@ static void draw_pet(uint16_t *fb, const epet_t *p, epet_mood_t mood)
         uint32_t phase = (p->anim_ms / 250) % 4;
         bob = (phase == 1) ? -2 : (phase == 3) ? 2 : 0;
     }
-    const int cx = PET_CX, cy = PET_CY + bob;
+    const int cx = PET_CX, gy = PET_GROUND + bob;
 
-    /* soft contact shadow so the sprite is not floating */
-    epet_shade(fb, cx - 30, cy + 40, 60, 7, EPET_C_BLACK, 60);
+    /* Contact shadow, sized with the creature -- a fixed 60px ellipse under
+     * a baby looks like it is standing on a manhole cover. */
+    int w = epet_actor_grown_width(&p->actor);
+    int sw = w ? (w * 2) / 3 : 60;
+    epet_shade(fb, cx - sw / 2, gy - 16, sw, 7, EPET_C_BLACK, 60);
 
     /* The dead pose has its own artwork -- a slump with crossed eyes and a
-     * departing spirit -- so it is drawn normally rather than tinted grey. */
-    epet_actor_draw(&p->actor, fb, cx, cy);
+     * departing spirit -- so it is drawn normally rather than tinted grey.
+     * draw_grown() picks the artwork and the size for the pet's age. */
+    epet_actor_draw_grown(&p->actor, fb, cx, gy);
 
     if (mood == EPET_MOOD_ASLEEP) {
-        epet_text(fb, cx + 34, cy - 44, "Z", EPET_C_WHITE, 2);
-        epet_text(fb, cx + 50, cy - 30, "Z", EPET_C_WHITE, 1);
+        /* Track the top of the creature, which moves as it grows. */
+        int top = gy - epet_actor_grown_height(&p->actor);
+        epet_text(fb, cx + sw / 2 + 4, top + 8,  "Z", EPET_C_WHITE, 2);
+        epet_text(fb, cx + sw / 2 + 20, top + 22, "Z", EPET_C_WHITE, 1);
     }
 }
 

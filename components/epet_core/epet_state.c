@@ -85,12 +85,21 @@ const char *epet_action_name(epet_action_t a)
 
 /* Reset the stats but keep the bus wiring, so a rebirth does not silently
  * unsubscribe every module. */
+uint8_t epet_age_level(const epet_t *p)
+{
+    if (!p) return 1;
+    uint32_t per = p->age_level_ms ? p->age_level_ms : EPET_AGE_LEVEL_MS_DEFAULT;
+    uint32_t lvl = p->age_ms / per + 1u;      /* a newborn is age 1, not 0 */
+    return (uint8_t)(lvl > EPET_AGE_MAX ? EPET_AGE_MAX : lvl);
+}
+
 static void reset_stats(epet_t *p)
 {
     epet_bus_t *bus = p->bus;
     const epet_species_t *sp = p->species;
     uint32_t revive_ms = p->revive_hold_ms;
     uint32_t blank_ms  = p->display_timeout_ms;
+    uint32_t agelvl_ms = p->age_level_ms;
     *p = (epet_t){
         .hunger    = 20.0f,
         .happiness = 80.0f,
@@ -103,10 +112,12 @@ static void reset_stats(epet_t *p)
         .idle_ms    = 0,
         .display_timeout_ms = EPET_DISPLAY_TIMEOUT_MS_DEFAULT,
         .revive_hold_ms     = EPET_REVIVE_HOLD_MS_DEFAULT,
+        .age_level_ms       = EPET_AGE_LEVEL_MS_DEFAULT,
     };
     p->bus = bus;
     if (revive_ms) p->revive_hold_ms = revive_ms;
     if (blank_ms)  p->display_timeout_ms = blank_ms;
+    if (agelvl_ms) p->age_level_ms = agelvl_ms;
     (void)sp;
     /* A birth is a new creature: roll its class from every installed
      * module's characters. The CLASS page can still override afterwards, but
@@ -137,6 +148,7 @@ void epet_init(epet_t *p)
     p->species = NULL;
     p->revive_hold_ms = 0;
     p->display_timeout_ms = 0;
+    p->age_level_ms = 0;
     reset_stats(p);         /* rolls the class and starts the birth pose */
 }
 
@@ -283,6 +295,7 @@ uint32_t epet_update(epet_t *p, uint32_t dt_ms,
         /* Covers every route into death: dying now, loading a dead save, or
          * a module removing the class out from under a corpse. */
         epet_actor_ensure(&p->actor, EPET_POSE_DEAD);
+        epet_actor_set_age(&p->actor, epet_age_level(p));
         epet_actor_tick(&p->actor, dt_ms);
         return surviving;
     }
@@ -369,6 +382,7 @@ uint32_t epet_update(epet_t *p, uint32_t dt_ms,
             (m == EPET_MOOD_SAD || m == EPET_MOOD_SICK) ? EPET_POSE_SAD
                                                         : EPET_POSE_IDLE);
     }
+    epet_actor_set_age(&p->actor, epet_age_level(p));
     epet_actor_tick(&p->actor, dt_ms);
 
     return surviving;

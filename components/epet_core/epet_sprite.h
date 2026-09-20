@@ -52,6 +52,19 @@ void epet_blit(uint16_t *fb, int x, int y, const epet_frame_t *f,
 /* Centred on (cx, cy) -- what the pet drawing actually wants. */
 void epet_blit_centred(uint16_t *fb, int cx, int cy, const epet_frame_t *f,
                        const epet_palette_t *pal, int scale);
+/* Fractional scaling, for sizes between the integer steps: `scale_q8` is
+ * 8.8 fixed point, so 256 is 1:1 and 384 is one and a half times. At a whole
+ * multiple of 256 the result is pixel-identical to epet_blit() above. */
+void epet_blit_q8(uint16_t *fb, int x, int y, const epet_frame_t *f,
+                  const epet_palette_t *pal, int scale_q8);
+void epet_blit_centred_q8(uint16_t *fb, int cx, int cy, const epet_frame_t *f,
+                          const epet_palette_t *pal, int scale_q8);
+/* Anchored by the bottom edge rather than the centre, so a creature that
+ * changes size keeps its feet on the same ground line. */
+void epet_blit_bottom_q8(uint16_t *fb, int cx, int ground_y,
+                         const epet_frame_t *f, const epet_palette_t *pal,
+                         int scale_q8);
+
 /* As above but every opaque pixel is drawn in one flat colour: cheap
  * silhouettes for shadows, flashes and death fades. */
 void epet_blit_tinted(uint16_t *fb, int cx, int cy, const epet_frame_t *f,

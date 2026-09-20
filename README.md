@@ -16,6 +16,13 @@ Neglect it and it sickens and dies; shake a dead one and a new creature
 hatches with a randomly rolled class. Each class has its own sprites,
 animations, home backdrop, temperament and even its own mess.
 
+**It grows up.** A pet has an age level from 1 to 50, and a character can
+change size and shape across that range. The built-in classes hatch small and
+round, fill out, and end up broad and stooped; the size ramps smoothly
+between stages, so every age level is a slightly different creature. Growing
+is a main-screen thing — pages draw the pet at a fixed size so their layouts
+stay put.
+
 **Four buttons**, named by position rather than meaning: two down the left of
 the screen, two down the right.
 
@@ -154,6 +161,7 @@ resolved **by name**, so adding one needs no firmware change:
 | `birth` | no | a new pet hatches |
 | `happy` | no | fed, played with |
 | `sad` | yes | mood is sad or sick |
+| `dead` | yes | the pet has died |
 
 Unknown names fall back to `idle`, so an older character can never crash on a
 pose added for a newer one.
@@ -166,6 +174,36 @@ A character also carries:
 - a **poop sprite**, drawn in the body palette
 - a **temperament**: per-stat decay multipliers, so a class is a behaviour and
   not just a recolour
+- **growth stages**, below
+
+#### Growth stages
+
+A pet's age level runs 1–50. A character may declare stages across that
+range, each giving a size and, optionally, its own artwork:
+
+| Field | Meaning |
+|---|---|
+| `from_age` | first age level this stage covers, 1–50 |
+| `scale_pct` | on-screen size; 100 is one sprite pixel per screen pixel |
+| `pose0`, `n_poses` | this stage's poses, or `0, 0` to inherit |
+
+Two things make this cheap. **Size is interpolated between stages**, so a
+character that declares four stages still looks slightly different at all
+fifty ages — you do not need fifty sets of artwork to get fifty sizes. And
+**a stage with no artwork costs six bytes**, so a growth spurt with no new
+art is nearly free; a character *can* declare all fifty stages.
+
+A stage may also define only *some* poses. What it leaves out falls back to
+the character's own poses, drawn at the stage's size — so a baby that only
+draws `idle` and `birth` still bounces for `happy`, just small.
+
+The sample pack does one of each: `sparklet` draws two poses, `spark` draws
+the full set, and the last stage carries no artwork and only grows. See
+`SPARK_GROWTH` in [tools/make_module.py](tools/make_module.py).
+
+Sizes are capped by the panel — the sprite is anchored by its feet on a fixed
+ground line, and the build fails rather than letting a character grow up into
+the status bar. With the standard 44×56 canvas the ceiling is about 350%.
 
 ### Pages
 

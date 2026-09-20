@@ -467,6 +467,7 @@ void app_main(void)
     }
     pet.display_timeout_ms = CONFIG_EPET_DISPLAY_TIMEOUT_MS;
     pet.revive_hold_ms     = CONFIG_EPET_REVIVE_HOLD_MS;
+    pet.age_level_ms       = CONFIG_EPET_AGE_LEVEL_MS;
     /* Loaded modules get events without a pet pointer of their own. */
     epet_set_active(&pet);
 

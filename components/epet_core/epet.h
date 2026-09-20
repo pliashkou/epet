@@ -16,6 +16,12 @@
  * do the shaking -- it only needs the figure so the death screen can say
  * what to do. Platforms overwrite it with their own setting. */
 #define EPET_REVIVE_HOLD_MS_DEFAULT 5000
+/* How long one age level lasts. The pet's age level runs 1..EPET_AGE_MAX and
+ * drives which growth stage it draws; see epet_species.h. Age itself keeps
+ * climbing past the top level, it just stops changing how the pet looks.
+ * The default puts a full childhood inside the fast development tuning;
+ * raise it along with the decay rates for real play. */
+#define EPET_AGE_LEVEL_MS_DEFAULT 3000
 
 /* Framebuffer holds panel-ready RGB565 (MSB first); see epet_draw.h. */
 #define EPET_RGB(r, g, b) \
@@ -75,6 +81,7 @@ typedef struct {
     uint32_t idle_ms;
     uint32_t display_timeout_ms;
     uint32_t revive_hold_ms;   /* shown on the death screen */
+    uint32_t age_level_ms;     /* wall time per age level; see the default */
 
     /* Event bus, optional. NULL means events are simply not raised, so the
      * core still works standalone (tests, minimal builds). */
@@ -121,6 +128,11 @@ void        epet_init(epet_t *p);
 /* Swap the character class. Keeps the pet's stats; restarts the animation.
  * Pass play_birth to replay the hatching sequence. */
 void        epet_set_species(epet_t *p, const epet_species_t *sp, bool play_birth);
+/* Current age level, 1..EPET_AGE_MAX. Clamped at the top: a pet older than
+ * that keeps ageing but stops growing. Drives the main-screen size and which
+ * growth stage's artwork is drawn. */
+uint8_t epet_age_level(const epet_t *p);
+
 /* Shortcut for pages: play a pose and fall back to the mood-driven loop. */
 void        epet_pet_emote(epet_t *p, const char *pose);
 /* If the pet's class is no longer in the installed pool -- its module was

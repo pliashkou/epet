@@ -31,7 +31,8 @@
  *    52   4   payload length
  *    56   4   FNV-1a of the payload
  *    60   1   n_hooks (background event handlers)
- *    61   3   reserved
+ *    61   1   n_stages (growth stages, across all species)
+ *    62   2   reserved
  *
  *   payload sections, in order:
  *     frames     n_frames    x { u8 w, u8 h, u8 px[w*h] }
@@ -50,6 +51,20 @@
  *     vmpages    n_vmpages   x { char title[12], u8 icon, u8 reserved,
  *                                u32 enter, u32 update, u32 render, u32 leave }
  *     hooks      n_hooks     x { u32 event_mask, u32 pc_event }
+ *     stages     n_stages    x { u8 species, u8 from_age, u16 scale_pct,
+ *                                u8 pose0, u8 n_poses }
+ *
+ * Growth stages give a character a size and, optionally, its own artwork for
+ * a band of age levels (1..EPET_AGE_MAX); see epet_species.h. Each record
+ * names its own species rather than the species record pointing at a range,
+ * which keeps the species record the size it has always been -- a pack built
+ * before growth existed simply has n_stages = 0 and parses unchanged. There
+ * is deliberately no version gate for this.
+ *
+ * Records must be grouped by species and ascending by from_age within a
+ * species; anything else is rejected rather than quietly mis-drawn. Setting
+ * n_poses to 0 means the stage inherits the previous stage's artwork and
+ * only changes size, which costs six bytes.
  *
  * A hook runs whenever a subscribed event fires, whether or not any of the
  * module's pages are open. That is what makes a pack a background module

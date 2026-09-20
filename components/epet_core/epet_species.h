@@ -35,6 +35,34 @@ typedef struct {
 /* Fills the whole screen. Safe with a zeroed backdrop. */
 void epet_backdrop_draw(const epet_backdrop_t *bd, uint16_t *fb, bool night);
 
+/* ---- growth ----------------------------------------------------------
+ *
+ * A creature's AGE LEVEL runs 1..EPET_AGE_MAX. A species may declare growth
+ * stages across that range; each stage sets a size and, optionally, its own
+ * artwork. Stages are what make a baby read as a baby rather than as a small
+ * adult.
+ *
+ * Only the MAIN SCREEN grows. Pages draw the pet at the species' base scale
+ * so their layouts stay put -- the stage still decides WHICH art is drawn
+ * there, because that is the same creature either way.
+ *
+ * Size is interpolated from one stage's `scale_pct` to the next one's across
+ * the ages between them, so every age level is a slightly different size
+ * rather than the size jumping at three or four thresholds. The last stage
+ * holds its size. A species with no stages at all just uses `scale`.
+ *
+ * `poses` may be NULL, which inherits whatever the previous stage (or the
+ * species) draws -- so a stage that only grows costs six bytes, and a pack
+ * may declare all fifty if it wants to. */
+#define EPET_AGE_MAX 50
+
+typedef struct {
+    uint8_t             from_age;    /* first age level covered, 1..EPET_AGE_MAX */
+    uint16_t            scale_pct;   /* 100 = one sprite pixel per screen pixel */
+    const epet_pose_t  *poses;       /* NULL inherits; see above */
+    uint8_t             n_poses;
+} epet_growth_t;
+
 typedef struct epet_species {
     const char         *name;        /* "BLOB", "SPROUT" */
     const char         *blurb;       /* one line, shown on the ABOUT page */
@@ -50,7 +78,21 @@ typedef struct epet_species {
      * so a species without art still works. Drawn with the body palette. */
     const epet_frame_t    *poop;
     epet_temperament_t  temper;
+    /* Growth stages, ordered by from_age. Empty means "never changes". */
+    const epet_growth_t   *stages;
+    uint8_t                n_stages;
 } epet_species_t;
+
+/* The stage covering this age level, or NULL if the species has none. */
+const epet_growth_t *epet_species_stage(const epet_species_t *sp, uint8_t age);
+/* Drawing size at this age, 8.8 fixed point (256 = 1:1), interpolated
+ * between stages. Falls back to the species' base `scale`. */
+int epet_species_scale_q8_at(const epet_species_t *sp, uint8_t age);
+/* Pose lookup that consults this age's stage first, then earlier stages,
+ * then the species' own poses. Same never-NULL guarantee as
+ * epet_species_pose_or_idle() for a species that defines "idle". */
+const epet_pose_t *epet_species_pose_at(const epet_species_t *sp, uint8_t age,
+                                        const char *name);
 
 /* Wraps the index; returns NULL only if the species has no backdrops. */
 const epet_backdrop_t *epet_species_backdrop(const epet_species_t *sp, uint8_t i);
@@ -76,6 +118,8 @@ typedef struct {
     uint8_t               key;
     uint32_t              t_ms;
     bool                  finished; /* a non-looping pose has run out */
+    uint8_t               age;      /* 1..EPET_AGE_MAX; 0 = not yet set,
+                                       treated as the youngest stage */
 } epet_actor_t;
 
 void epet_actor_init(epet_actor_t *a, const epet_species_t *sp);
@@ -86,6 +130,16 @@ void epet_actor_play(epet_actor_t *a, const char *pose, const char *resume);
 void epet_actor_ensure(epet_actor_t *a, const char *pose);
 void epet_actor_tick(epet_actor_t *a, uint32_t dt_ms);
 void epet_actor_draw(const epet_actor_t *a, uint16_t *fb, int cx, int cy);
+/* Set the age level, re-resolving the running pose inside the new stage if
+ * the stage changed. The animation keeps its frame index and phase, so
+ * growing up mid-blink does not restart the blink. */
+void epet_actor_set_age(epet_actor_t *a, uint8_t age);
+/* Main-screen draw: the stage's size, with the feet on `ground_y`. */
+void epet_actor_draw_grown(const epet_actor_t *a, uint16_t *fb,
+                           int cx, int ground_y);
+/* On-screen size of the grown sprite, for placing what sits beside it. */
+int  epet_actor_grown_width(const epet_actor_t *a);
+int  epet_actor_grown_height(const epet_actor_t *a);
 /* Same, at an explicit scale rather than the species' own -- info screens
  * want the character small enough to sit in a list. */
 void epet_actor_draw_scaled(const epet_actor_t *a, uint16_t *fb,

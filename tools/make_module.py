@@ -88,32 +88,71 @@ def embers(cv):
         cv.disc(x, y, r, 8)
 
 
-POSES = {
-    "idle":  [(frame(ry=15), 700), (frame(cy=23, ry=16), 700),
-              (frame(ry=15), 500), (frame(ry=15, eye="closed"), 130)],
-    "birth": [(frame(cy=32, rx=4, ry=4, spread=3, feet=False, eye="closed"), 260),
-              (frame(cy=29, rx=8, ry=8, spread=5, feet=False, eye="closed"), 260),
-              (frame(cy=26, rx=12, ry=12, spread=7, eye="closed"), 280),
-              (frame(cy=24, rx=15, ry=15, eye="open", mth="o", fx=embers), 380),
-              (frame(cy=24, rx=15, ry=15, eye="happy", mth="smile", fx=embers), 460)],
-    "happy": [(frame(cy=26, rx=16, ry=13, eye="happy", mth="smile"), 130),
-              (frame(cy=19, rx=14, ry=18, eye="happy", mth="grin", fx=embers), 200),
-              (frame(cy=23, rx=15, ry=15, eye="happy", mth="grin", fx=embers), 200),
-              (frame(cy=25, rx=16, ry=14, eye="happy", mth="smile"), 200)],
-    "sad":   [(frame(cy=27, rx=16, ry=12, eye="sad", mth="frown"), 700),
-              (frame(cy=28, rx=17, ry=11, eye="sad", mth="frown"), 700)],
-    # A flame that has gone out: flattened, crossed, with the last smoke
-    # curling away. Its own pose, not the idle frame greyed.
-    "dead":  [(frame(cy=31, rx=17, ry=8, eye="dead", mth="flat",
-                     spread=8, feet=False, fx=smoke(0)), 520),
-              (frame(cy=31, rx=17, ry=8, eye="dead", mth="flat",
-                     spread=8, feet=False, fx=smoke(6)), 520),
-              (frame(cy=32, rx=18, ry=7, eye="dead", mth="flat",
-                     spread=8, feet=False, fx=smoke(12)), 520),
-              (frame(cy=32, rx=18, ry=7, eye="dead", mth="flat",
-                     spread=8, feet=False), 900)],
-}
+def morphed(morph):
+    """Reshape every pose in a stage from the same drawing code, exactly the
+    way tools/gen_sprites.py does it for the built-in species."""
+    sx   = morph.get("sx", 1.0)
+    sy   = morph.get("sy", 1.0)
+    dy   = morph.get("dy", 0)
+    sspr = morph.get("spread", 1.0)
+    nofeet = morph.get("feet", True) is False
+
+    def f(cy=24, rx=15, ry=15, spread=8, feet=True, **kw):
+        return frame(cy=cy + dy,
+                     rx=max(2, int(round(rx * sx))),
+                     ry=max(2, int(round(ry * sy))),
+                     spread=max(3, int(round(spread * sspr))),
+                     feet=False if nofeet else feet, **kw)
+    return f
+
+
+def build_poses(morph=None):
+    frame = morphed(morph or {})      # shadows the module-level frame()
+    return {
+        "idle":  [(frame(ry=15), 700), (frame(cy=23, ry=16), 700),
+                  (frame(ry=15), 500), (frame(ry=15, eye="closed"), 130)],
+        "birth": [(frame(cy=32, rx=4, ry=4, spread=3, feet=False, eye="closed"), 260),
+                  (frame(cy=29, rx=8, ry=8, spread=5, feet=False, eye="closed"), 260),
+                  (frame(cy=26, rx=12, ry=12, spread=7, eye="closed"), 280),
+                  (frame(cy=24, rx=15, ry=15, eye="open", mth="o", fx=embers), 380),
+                  (frame(cy=24, rx=15, ry=15, eye="happy", mth="smile", fx=embers), 460)],
+        "happy": [(frame(cy=26, rx=16, ry=13, eye="happy", mth="smile"), 130),
+                  (frame(cy=19, rx=14, ry=18, eye="happy", mth="grin", fx=embers), 200),
+                  (frame(cy=23, rx=15, ry=15, eye="happy", mth="grin", fx=embers), 200),
+                  (frame(cy=25, rx=16, ry=14, eye="happy", mth="smile"), 200)],
+        "sad":   [(frame(cy=27, rx=16, ry=12, eye="sad", mth="frown"), 700),
+                  (frame(cy=28, rx=17, ry=11, eye="sad", mth="frown"), 700)],
+        # A flame that has gone out: flattened, crossed, with the last smoke
+        # curling away. Its own pose, not the idle frame greyed.
+        "dead":  [(frame(cy=31, rx=17, ry=8, eye="dead", mth="flat",
+                         spread=8, feet=False, fx=smoke(0)), 520),
+                  (frame(cy=31, rx=17, ry=8, eye="dead", mth="flat",
+                         spread=8, feet=False, fx=smoke(6)), 520),
+                  (frame(cy=32, rx=18, ry=7, eye="dead", mth="flat",
+                         spread=8, feet=False, fx=smoke(12)), 520),
+                  (frame(cy=32, rx=18, ry=7, eye="dead", mth="flat",
+                         spread=8, feet=False), 900)],
+    }
+
+
 POSE_ORDER = ["idle", "birth", "happy", "sad", "dead"]
+
+# SPARK grows through three stages. The last one carries NO artwork of its
+# own: it inherits the stage before it and only changes size, which is the
+# six-byte path a pack could take fifty times over.
+# Three ways to spend bytes on a stage, one of each:
+#   sparklet  draws only the two poses where being small actually reads --
+#             hatching, and standing about. "happy" and "sad" fall through to
+#             the grown-up animation, drawn at the sparklet's size.
+#   spark     the full set: this is what a SPARK looks like.
+#   (None)    no artwork at all, six bytes, just a final growth spurt.
+SPARK_GROWTH = [
+    #  poses this stage draws  from_age  scale_pct  morph
+    (["idle", "birth"],        1,        140,  dict(sx=0.78, sy=0.82, dy=4,
+                                                    spread=0.75, feet=False)),
+    (POSE_ORDER,               14,       215,  dict()),
+    (None,                     32,       290,  None),
+]
 
 SPARK_PAL = [0, rgb565(60, 20, 10), rgb565(255, 140, 40), rgb565(255, 220, 110),
              rgb565(200, 80, 20), 0xFFFF, rgb565(40, 15, 10), rgb565(70, 25, 15),
@@ -461,15 +500,34 @@ def spark_embers():
     return cv
 
 
+def enc_stage(species, from_age, scale_pct, pose0, n_poses):
+    return bytes([species, from_age]) + struct.pack("<H", scale_pct) + \
+           bytes([pose0, n_poses])
+
+
 def build():
     frames, poses = [], []
+    stages = []
 
-    for pname in POSE_ORDER:
-        keys = []
-        for cv, hold in POSES[pname]:
-            keys.append((len(frames), hold))
-            frames.append(cv)
-        poses.append((pname, pname in ("idle", "sad", "dead"), keys))
+    # One pose set per growth stage that declares artwork. A stage with no
+    # artwork records pose0/n_poses of 0 and inherits the previous one.
+    for (names, from_age, scale_pct, morph) in SPARK_GROWTH:
+        if not names:
+            stages.append((from_age, scale_pct, 0, 0))
+            continue
+        built = build_poses(morph)
+        pose0 = len(poses)
+        for pname in names:
+            keys = []
+            for cv, hold in built[pname]:
+                keys.append((len(frames), hold))
+                frames.append(cv)
+            poses.append((pname, pname in ("idle", "sad", "dead"), keys))
+        stages.append((from_age, scale_pct, pose0, len(names)))
+
+    # The species' own poses are the grown-up set, which is what pages and
+    # the CLASS preview should show; see BASE_STAGE in gen_sprites.py.
+    base_pose0 = stages[1][2]
 
     bg_idx = len(frames)
     frames.append(bg_hearth())
@@ -485,7 +543,7 @@ def build():
     payload += enc_backdrop("HEARTH", bg_idx, 3, rgb565(20, 26, 70), 150, HEARTH_PAL)
     payload += enc_species(
         "SPARK", "BURNS BRIGHT. TIRES FAST.", SPARK_PAL, 2,
-        (1.15, 0.9, 1.4, 0.8), 0, len(poses), 0, 1, poop_idx)
+        (1.15, 0.9, 1.4, 0.8), base_pose0, len(POSE_ORDER), 0, 1, poop_idx)
 
     rows = [
         (SPRITE, SRC["none"], ""),
@@ -513,6 +571,10 @@ def build():
     watched = (1 << 4) | (1 << 12) | (1 << 5)      # POOPED | DIED | HUNGRY
     payload += enc_hook(watched, asm.labels["on_event"])
 
+    # growth stages, last section; species 0 is SPARK
+    for (from_age, scale_pct, pose0, npo) in stages:
+        payload += enc_stage(0, from_age, scale_pct, pose0, npo)
+
     header = bytearray(HEADER)
     header[0:5] = MAGIC
     header[5] = FMT_VERSION
@@ -525,7 +587,8 @@ def build():
     header[49] = 1          # species
     header[50] = 1          # declarative pages
     header[51] = 1          # bytecode pages
-    header[60] = 1          # background hooks
+    header[60] = 1              # background hooks
+    header[61] = len(stages)    # growth stages
     struct.pack_into("<I", header, 52, len(payload))
     struct.pack_into("<I", header, 56, fnv1a(payload))
     return bytes(header) + payload

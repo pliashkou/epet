@@ -58,11 +58,113 @@ const epet_pose_t *epet_species_pose_or_idle(const epet_species_t *sp, const cha
     return (sp && sp->n_poses) ? &sp->poses[0] : 0;
 }
 
+/* ---- growth ---------------------------------------------------------- */
+
+static uint8_t clamp_age(uint8_t age)
+{
+    if (age < 1) return 1;
+    if (age > EPET_AGE_MAX) return EPET_AGE_MAX;
+    return age;
+}
+
+/* Index of the stage covering `age`, or -1. Stages are ordered by from_age,
+ * so this is the last one that has started. */
+static int stage_index(const epet_species_t *sp, uint8_t age)
+{
+    if (!sp || sp->n_stages == 0) return -1;
+    int found = -1;
+    for (uint8_t i = 0; i < sp->n_stages; i++) {
+        if (sp->stages[i].from_age <= age) found = (int)i;
+        else break;
+    }
+    /* Younger than the first stage declares: use the first. A species whose
+     * stages start at age 3 should still draw something at age 1. */
+    return found < 0 ? 0 : found;
+}
+
+const epet_growth_t *epet_species_stage(const epet_species_t *sp, uint8_t age)
+{
+    int i = stage_index(sp, clamp_age(age));
+    return i < 0 ? 0 : &sp->stages[i];
+}
+
+int epet_species_scale_q8_at(const epet_species_t *sp, uint8_t age)
+{
+    if (!sp) return 256;
+    uint8_t base = sp->scale ? sp->scale : 1;
+
+    age = clamp_age(age);
+    int i = stage_index(sp, age);
+    if (i < 0) return base * 256;               /* no stages: never changes */
+
+    const epet_growth_t *cur = &sp->stages[i];
+    uint16_t from_pct = cur->scale_pct ? cur->scale_pct : (uint16_t)(base * 100);
+
+    /* Last stage, or age below the first: hold this size. */
+    if (i + 1 >= (int)sp->n_stages || age < cur->from_age)
+        return (int)((uint32_t)from_pct * 256u / 100u);
+
+    const epet_growth_t *next = &sp->stages[i + 1];
+    uint16_t to_pct = next->scale_pct ? next->scale_pct : from_pct;
+
+    /* Interpolate across the ages this stage covers, so each level is its
+     * own size instead of the size stepping at a handful of thresholds. */
+    uint16_t span = (uint16_t)(next->from_age - cur->from_age);
+    if (span == 0) return (int)((uint32_t)from_pct * 256u / 100u);
+    uint16_t into = (uint16_t)(age - cur->from_age);
+
+    int32_t pct = (int32_t)from_pct +
+                  ((int32_t)to_pct - (int32_t)from_pct) * (int32_t)into / (int32_t)span;
+    if (pct < 1) pct = 1;
+    return (int)((uint32_t)pct * 256u / 100u);
+}
+
+/* Look in this stage, then walk back through earlier stages, then the
+ * species itself. Walking back is what lets a stage declare only the poses
+ * that actually change -- an ELDER that just stoops needs a new "idle" and
+ * inherits "happy" from whoever last defined it. */
+static const epet_pose_t *stage_pose(const epet_species_t *sp, int from_stage,
+                                     const char *name)
+{
+    for (int i = from_stage; i >= 0; i--) {
+        const epet_growth_t *g = &sp->stages[i];
+        for (uint8_t k = 0; k < g->n_poses; k++) {
+            if (strcmp(g->poses[k].name, name) == 0) return &g->poses[k];
+        }
+    }
+    return 0;
+}
+
+const epet_pose_t *epet_species_pose_at(const epet_species_t *sp, uint8_t age,
+                                        const char *name)
+{
+    if (!sp || !name) return 0;
+    int i = stage_index(sp, clamp_age(age));
+    if (i >= 0) {
+        const epet_pose_t *p = stage_pose(sp, i, name);
+        if (p) return p;
+        /* This stage does not draw that pose. Prefer the species' own
+         * version of it over this stage's idle: a pose is about what the
+         * creature is DOING, and the wrong action reads far more wrongly
+         * than slightly wrong proportions. So a baby with only "idle" and
+         * "birth" still bounces for "happy", drawn from the base art at the
+         * baby's size, rather than standing there. */
+        p = epet_species_pose(sp, name);
+        if (p) return p;
+        /* Nobody defines it at all -- this stage's idle, then the usual
+         * species-level fallback chain. */
+        p = stage_pose(sp, i, EPET_POSE_IDLE);
+        if (p) return p;
+    }
+    return epet_species_pose_or_idle(sp, name);
+}
+
 /* ---- player ---------------------------------------------------------- */
 
 void epet_actor_init(epet_actor_t *a, const epet_species_t *sp)
 {
     a->sp = sp;
+    a->age = 0;
     a->pose = epet_species_pose_or_idle(sp, EPET_POSE_IDLE);
     a->resume = EPET_POSE_IDLE;
     a->key = 0;
@@ -70,9 +172,26 @@ void epet_actor_init(epet_actor_t *a, const epet_species_t *sp)
     a->finished = false;
 }
 
+void epet_actor_set_age(epet_actor_t *a, uint8_t age)
+{
+    if (!a || a->age == age) return;
+    const epet_growth_t *before = epet_species_stage(a->sp, a->age);
+    a->age = age;
+    const epet_growth_t *after = epet_species_stage(a->sp, age);
+    if (before == after || !a->pose) return;
+
+    /* Crossed into a stage with different art. Re-resolve the SAME pose name
+     * there and keep the frame index and phase, so a creature that grows up
+     * mid-blink finishes the blink instead of snapping back to frame 0. */
+    const epet_pose_t *p = epet_species_pose_at(a->sp, age, a->pose->name);
+    if (!p || p == a->pose) return;
+    a->pose = p;
+    if (a->key >= p->n_keys) a->key = p->n_keys ? (uint8_t)(p->n_keys - 1) : 0;
+}
+
 void epet_actor_play(epet_actor_t *a, const char *pose, const char *resume)
 {
-    const epet_pose_t *p = epet_species_pose_or_idle(a->sp, pose);
+    const epet_pose_t *p = epet_species_pose_at(a->sp, a->age, pose);
     if (!p) return;
     a->pose = p;
     a->resume = resume;
@@ -150,6 +269,29 @@ void epet_actor_draw_tinted(const epet_actor_t *a, uint16_t *fb, int cx, int cy,
     const epet_frame_t *f = current_frame(a);
     if (!f || !a->sp) return;
     epet_blit_tinted(fb, cx, cy, f, colour, alpha, a->sp->scale);
+}
+
+void epet_actor_draw_grown(const epet_actor_t *a, uint16_t *fb,
+                           int cx, int ground_y)
+{
+    const epet_frame_t *f = current_frame(a);
+    if (!f || !a->sp) return;
+    epet_blit_bottom_q8(fb, cx, ground_y, f, &a->sp->palette,
+                        epet_species_scale_q8_at(a->sp, a->age));
+}
+
+int epet_actor_grown_width(const epet_actor_t *a)
+{
+    const epet_frame_t *f = current_frame(a);
+    if (!f || !a->sp) return 0;
+    return (f->w * epet_species_scale_q8_at(a->sp, a->age)) >> 8;
+}
+
+int epet_actor_grown_height(const epet_actor_t *a)
+{
+    const epet_frame_t *f = current_frame(a);
+    if (!f || !a->sp) return 0;
+    return (f->h * epet_species_scale_q8_at(a->sp, a->age)) >> 8;
 }
 
 const char *epet_actor_pose_name(const epet_actor_t *a)
