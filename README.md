@@ -49,30 +49,32 @@ and an ESP32-S3-LCD-1.3.
 
 ```bash
 git clone <this repo> epet && cd epet
-source ~/esp/esp-idf/export.sh
+. /path/to/esp-idf/export.sh
 idf.py build
-idf.py -p /dev/cu.wchusbserial* -b 460800 flash monitor
+idf.py -p $PORT -b 460800 flash monitor
 ```
 
-> **Flash over the CH343 UART port** (`/dev/cu.wchusbserial*` on macOS), not
-> the native USB-JTAG port. The JTAG port detects the chip but fails every
-> write on this board. See [CLAUDE.md](CLAUDE.md) for the exact failure modes.
+> **Flash over the CH343 UART bridge**, not the chip's native USB port. The
+> bridge enumerates as `/dev/ttyUSB*` on Linux, `/dev/cu.wchusbserial*` on
+> macOS and a `COM` port on Windows. The native USB port is not usable here:
+> it is not wired to the Type-C connector, and the firmware switches its PHY
+> off anyway to free GPIO20 for the backlight (see **Hardware notes**).
 
 The partition table uses two 3 MB app slots for OTA, so if you are coming from
 a different layout, erase first:
 
 ```bash
-idf.py -p /dev/cu.wchusbserial* erase-flash
+idf.py -p $PORT erase-flash
 ```
 
 ### The simulator
 
 The whole pet — simulation, menu, pages, animations — is platform-independent
-and runs natively on macOS/Linux with SDL2. It renders a mock device with
+and builds against SDL2 on any desktop. It renders a mock device with
 clickable buttons.
 
 ```bash
-brew install sdl2          # or your platform's package
+# install SDL2 with your package manager, then:
 cd sim && make && ./epet_sim
 ```
 
@@ -291,7 +293,7 @@ components/epet_core/   everything platform-independent
   epet_link.[ch]          install protocol (transport agnostic)
   epet_save.[ch]          persistence
 main/                   ESP32 platform: LCD, buttons, IMU, BLE, OTA, storage
-sim/                    macOS/Linux platform: SDL2 window, file storage
+sim/                    host platform: SDL2 window, file storage
 tools/                  sprite generator, bytecode assembler, pack builder
 web/                    the browser installer
 tests/                  eight suites, host-run
@@ -305,10 +307,38 @@ layer.
 
 ## Hardware notes
 
-Details that cost real debugging time are in [CLAUDE.md](CLAUDE.md): the LCD's
-80-row GRAM offset, why flashing only works over the UART bridge, the IMU's
-I²C timeout trap, and why shake detection measures sample-to-sample change
-rather than deviation from gravity.
+Pins, taken from the board's
+[schematic](https://files.waveshare.com/wiki/ESP32-S3-LCD-1.3/ESP32S3_1.3inch.pdf)
+rather than from the vendor's demo code, which is wrong about the backlight:
+
+| Signal | GPIO |
+|---|---|
+| LCD MOSI / SCLK / CS / DC / RST | 41 / 40 / 39 / 38 / 42 |
+| LCD backlight (`BL_PWM`) | 20 |
+| IMU I²C SDA / SCL | 47 / 48 |
+| BOOT button (active low) | 0 |
+
+**The backlight is GPIO20, and it hides behind the USB PHY.** `BL_PWM` drives
+a 1 kΩ resistor into Q5, an MMBT3904 whose collector feeds the panel's `LEDA`,
+so the pin is **active high**. But GPIO19 and GPIO20 are also the ESP32-S3's
+native USB D− and D+, and the ROM leaves `USB_SERIAL_JTAG_CONF0_REG`'s
+`USB_PAD_ENABLE` bit set — which lets the USB PHY drive both pads through the
+GPIO matrix. Until that bit is cleared, every write to GPIO20 is accepted and
+silently discarded, and the backlight appears to be hardwired on:
+
+```c
+usb_serial_jtag_ll_phy_enable_pad(false);   /* hal/usb_serial_jtag_ll.h */
+gpio_reset_pin(20);
+```
+
+That costs nothing on this board, because the Type-C connector goes to the
+CH343P bridge rather than to the chip's own USB. The vendor factory program
+names GPIO4 as the backlight; GPIO4 is not in the backlight net at all.
+
+Other details that cost real debugging time are in [CLAUDE.md](CLAUDE.md): the
+LCD's 80-row GRAM offset, the IMU's I²C timeout trap, why shake detection
+measures sample-to-sample change rather than deviation from gravity, and why
+nothing here may delay for less than one 10 ms FreeRTOS tick.
 
 ## Licence
 

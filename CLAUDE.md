@@ -46,13 +46,24 @@ Both are required or the image is wrong, and both come from the factory source:
 
 ## Flashing — use the UART port, not USB-JTAG
 
-Flash and monitor over **`/dev/cu.wchusbserial*`** (CH343 UART bridge).
+Flash and monitor over the **CH343 UART bridge** (`/dev/ttyUSB*` on Linux,
+`/dev/cu.wchusbserial*` on macOS, a `COM` port on Windows). It works at
+460800 with no issues.
 
-The native USB-Serial-JTAG port `/dev/cu.usbmodem*` detects the chip but fails
-every write: `Failed to write to target RAM (0107: Checksum error)` with the
-stub, `Failed to write to target Flash after seq 0 (0105)` with `--no-stub`.
+The native USB-Serial-JTAG port detects the chip but fails every write:
+`Failed to write to target RAM (0107: Checksum error)` with the stub,
+`Failed to write to target Flash after seq 0 (0105)` with `--no-stub`.
 Lowering the baud rate does not help, and its console emits nothing once the
-app runs. The UART bridge works at 460800 with no issues.
+app runs.
+
+The reason is now clear: **the chip's own D+/D- reach no connector.** There is
+exactly one Type-C on the board and its data pins go to the CH343P; the
+schematic reuses GPIO19/20 for `RST_Control` and `BL_PWM` instead. So there
+was never a USB path to the ESP32 for that port to work over.
+
+The firmware now turns the PHY off during `lcd_init()` to free GPIO20 for the
+backlight, so the port does not appear at all. That is the correct behaviour
+here, not a regression.
 
 Keep `CONFIG_ESP_CONSOLE_UART_DEFAULT=y` in `sdkconfig.defaults` for the same
 reason — the USB-JTAG console produces no output on this board.
@@ -64,27 +75,28 @@ components/epet_core/   epet.h, epet_state.c, epet_render.c
                         All pet logic and drawing. No ESP-IDF, no SDL.
                         Framebuffer is native-endian RGB565, uint16_t[240*240].
 main/main.c             ESP32 platform layer: ST7789 + GPIO buttons.
-sim/main.c              macOS platform layer: SDL2 window + keyboard buttons.
+sim/main.c              host platform layer: SDL2 window + keyboard buttons.
 sim/Makefile
 ```
 
-The device firmware and the macOS simulator compile the *same* `epet_core`
+The device firmware and the host simulator compile the *same* `epet_core`
 sources, so they cannot drift. Only the framebuffer destination and the button
 source differ. Put new logic or drawing in `epet_core`, never in a platform
 layer.
 
 ## Build and run
 
-ESP-IDF v5.5.1 lives at `~/esp/esp-idf`; the toolchain is installed for
-`esp32s3` only.
+ESP-IDF v5.5.1, toolchain installed for `esp32s3` only. `$PORT` is the CH343
+UART bridge -- see **Flashing** below for why it must not be the native USB
+port.
 
 ```bash
-source ~/esp/esp-idf/export.sh
+. /path/to/esp-idf/export.sh
 idf.py build
-idf.py -p /dev/cu.wchusbserial595B0611961 -b 460800 flash monitor
+idf.py -p $PORT -b 460800 flash monitor
 ```
 
-Simulator (SDL2 via Homebrew, built `-g -O0` for lldb):
+Simulator (needs SDL2; built `-g -O0` for a debugger):
 
 ```bash
 cd sim && make && ./epet_sim
@@ -104,7 +116,7 @@ Headless frame dumping, for checking rendering without a window or hardware:
 It writes `epet_<time>ms.bmp` per requested sim time and prints the stat line
 for each. `--device` renders the whole mock device including buttons rather
 than just the panel; `--page STATS` pins a page open so its layout can be
-inspected. Convert with `sips -s format png in.bmp --out out.png`.
+inspected. The output is BMP; convert to PNG with whatever the host has.
 
 ## Display power
 
@@ -178,7 +190,7 @@ RTC memory or NVS and a full re-init on wake.
 ## Architecture
 
 Everything that is not hardware lives in `components/epet_core` and is
-compiled unchanged by both the firmware and the macOS simulator.
+compiled unchanged by both the firmware and the host simulator.
 
 ```
 epet_module.[ch]  module registry: bundles of characters + sub-programs
@@ -728,8 +740,8 @@ A timer wake must NOT light the screen; only a press or an alert does.
   already adds the SDL2 directory.
 - Decay rates at the top of `epet_state.c` are tuned **fast** for development
   (full life cycle in ~2.5 min). Slow them down substantially for real play.
-- Disk on this Mac is tight (~4 GB free). The ESP-IDF install is ~3.4 GB;
-  `~/.espressif/dist` is safe to delete after installing.
+- The ESP-IDF install is ~3.4 GB. `~/.espressif/dist` holds the downloaded
+  archives and is safe to delete once the toolchain is installed.
 - The ST7789 retains its last frame in GRAM across an ESP32 reset. A stale
   image on screen is not evidence that a flash succeeded — check the serial log.
 - Adding a `Kconfig.projbuild` does not take effect on an incremental build;
