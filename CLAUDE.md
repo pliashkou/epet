@@ -550,6 +550,24 @@ Decisions worth keeping:
   flushes just before entering light sleep, since the next wake may be
   minutes away.
 
+### The FreeRTOS tick is 10 ms, and it has bitten three times
+
+`CONFIG_FREERTOS_HZ=100`, so **any delay under 10 ms rounds to zero ticks**.
+Three separate bugs here came from that, each presenting as something else:
+
+- `vTaskDelay(pdMS_TO_TICKS(2))` in the module transfer loop yielded nothing,
+  spun CPU0 for the whole transfer and starved IDLE0, tripping the task
+  watchdog every 5 s. Looked like slow flash writes; the NVS write actually
+  takes 506 ms. Use `vTaskDelay(1)` when you mean "yield for a moment".
+- `vTaskDelay(pdMS_TO_TICKS(15))` between IMU burst samples collapsed the
+  burst into a few milliseconds, so a shaken board measured 5-60 mg. Use
+  `esp_rom_delay_us()` when the spacing itself matters.
+- `pdMS_TO_TICKS()` wrapped around an I2C timeout that was already in
+  milliseconds double-converted to 0 ticks, so every register read failed.
+
+When something times out, stalls or samples nothing, check the tick maths
+before suspecting the hardware.
+
 ### The backlight cannot be switched off
 
 Not in software, on this board revision. The vendor's factory program drives

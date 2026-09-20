@@ -266,6 +266,9 @@ static bool nvs_write(void *ctx, const char *key, const void *buf, size_t len)
     (void)ctx;
     nvs_handle_t h;
     if (nvs_open("epet", NVS_READWRITE, &h) != ESP_OK) return false;
+    /* A 55 KB pack writes in about half a second, well inside the watchdog
+     * window -- the storms during installs came from the transfer loop, not
+     * from here. */
     esp_err_t e = nvs_set_blob(h, key, buf, len);
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
@@ -539,8 +542,14 @@ void app_main(void)
          * light sleep would stop us servicing either link. */
         if (link.receiving || ble_link_get()->receiving ||
             ble_link_connected() || ota_in_progress()) {
-            /* A module is arriving: service the port, skip the redraw. */
-            vTaskDelay(pdMS_TO_TICKS(2));
+            /* A module is arriving: service the port, skip the redraw.
+             *
+             * vTaskDelay(1), not pdMS_TO_TICKS(2): the tick here is 10 ms,
+             * so any delay under 10 ms rounds to ZERO ticks and does not
+             * yield at all. That spun CPU0 for the whole transfer and
+             * starved IDLE0, tripping the task watchdog every 5 s. The link
+             * acks each chunk, so one drain per tick keeps up easily. */
+            vTaskDelay(1);
             continue;
         }
 
