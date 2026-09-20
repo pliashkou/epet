@@ -1,0 +1,315 @@
+# epet
+
+A Tamagotchi-style virtual pet for the **Waveshare ESP32-S3-LCD-1.3**, with a
+module system that lets you install new characters and sub-programs from a web
+browser over USB or Bluetooth.
+
+The pet lives on a 240×240 colour LCD, sleeps when you leave it alone, wakes
+when you shake it, and keeps living across reboots.
+
+---
+
+## What it does
+
+**The pet.** Hunger, happiness, energy, hygiene and health drift over time.
+Neglect it and it sickens and dies; shake a dead one and a new creature
+hatches with a randomly rolled class. Each class has its own sprites,
+animations, home backdrop, temperament and even its own mess.
+
+**Four buttons**, named by position rather than meaning: two down the left of
+the screen, two down the right.
+
+| Button | Menu hidden | Menu shown | Inside a page |
+|---|---|---|---|
+| LT | reveal menu | previous item (wraps) | page's choice |
+| LB | reveal menu | next item (wraps) | page's choice |
+| RT | reveal menu | select | page's choice |
+| RB | — | — | back |
+
+**A translucent icon menu** down the left edge that fades out when unused, so
+the pet is unobstructed.
+
+**Power.** The screen blanks after 30 s and the CPU drops into light sleep,
+waking on a button, on serial traffic, or on a timer to keep the simulation
+moving. Shake it and the screen lights.
+
+**Modules.** Characters and sub-programs ship as `.epmod` packs installed from
+a browser. They survive reboots. A pack can carry real bytecode, so a module
+is a program, not just a screen.
+
+**Firmware updates** over the same link, into a spare app slot with bootloader
+rollback.
+
+---
+
+## Installation
+
+You need [ESP-IDF v5.5](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/)
+and an ESP32-S3-LCD-1.3.
+
+```bash
+git clone <this repo> epet && cd epet
+source ~/esp/esp-idf/export.sh
+idf.py build
+idf.py -p /dev/cu.wchusbserial* -b 460800 flash monitor
+```
+
+> **Flash over the CH343 UART port** (`/dev/cu.wchusbserial*` on macOS), not
+> the native USB-JTAG port. The JTAG port detects the chip but fails every
+> write on this board. See [CLAUDE.md](CLAUDE.md) for the exact failure modes.
+
+The partition table uses two 3 MB app slots for OTA, so if you are coming from
+a different layout, erase first:
+
+```bash
+idf.py -p /dev/cu.wchusbserial* erase-flash
+```
+
+### The simulator
+
+The whole pet — simulation, menu, pages, animations — is platform-independent
+and runs natively on macOS/Linux with SDL2. It renders a mock device with
+clickable buttons.
+
+```bash
+brew install sdl2          # or your platform's package
+cd sim && make && ./epet_sim
+```
+
+Keys: `Q`/`A`/`P`/`L` for LT/LB/RT/RB, `R` reset, `S` screenshot, `[`/`]`
+speed, `Esc` quit. `--save-dir DIR` persists the pet, `--verbose` logs events.
+
+Headless rendering, useful in CI or for checking artwork:
+
+```bash
+./epet_sim --headless --shots 0,60000 --out /tmp/shots   # panel only
+./epet_sim --headless --device --shots 0 --out /tmp      # whole mock device
+./epet_sim --headless --page STATS --shots 300 --out /tmp
+```
+
+### Tests
+
+```bash
+cd sim && make test
+```
+
+Eight suites covering the simulation, the event bus, the menu, characters,
+modules, persistence, the bytecode VM and the install protocol. No hardware
+required.
+
+---
+
+## The module system
+
+### Installing from a browser
+
+```bash
+python3 -m http.server -d web 8000     # then open http://localhost:8000
+```
+
+Chrome or Edge, over `localhost` or https — Web Serial and Web Bluetooth both
+refuse `file://`.
+
+- **By cable** — *Connect by cable*, pick the `wchusbserial` port.
+- **By Bluetooth** — open **UPDATE** on the pet's own menu first. The radio is
+  off until you do, and switches off when you leave that page, so the device
+  is not discoverable while it is just being a pet.
+
+The **Install** page takes an `.epmod`; **Manage** reads what is on the device
+and removes packs; **Firmware** flashes a new `.bin`.
+
+A sample pack is included: [`web/spark.epmod`](web/spark.epmod) adds a third
+character (SPARK, a flame that burns bright and tires fast, with its own
+hearth backdrop and ember droppings), a bytecode page, and a background event
+handler.
+
+---
+
+## Writing a pack
+
+A pack is a binary file containing **characters** (sprites, animations,
+backdrops, temperament), **pages** (sub-programs) and **hooks** (background
+event handlers). Build one with the Python tools in `tools/`:
+
+```bash
+python3 tools/make_module.py my.epmod
+```
+
+`tools/make_module.py` is a worked example — read it alongside this section.
+
+### Characters
+
+A character is data. Frames are 8bpp palette-indexed bitmaps where **index 0
+is transparent**; indices 1–15 look up in the species palette, so two species
+can share sprite structure and look completely different.
+
+A **pose** is a named sequence of frames with per-frame hold times. Poses are
+resolved **by name**, so adding one needs no firmware change:
+
+| Pose | Loops | When |
+|---|---|---|
+| `idle` | yes | default |
+| `birth` | no | a new pet hatches |
+| `happy` | no | fed, played with |
+| `sad` | yes | mood is sad or sick |
+
+Unknown names fall back to `idle`, so an older character can never crash on a
+pose added for a newer one.
+
+A character also carries:
+
+- a **palette** (16 RGB565 entries, index 0 unused)
+- one or more **backdrops** — 80×80 images scaled 3×, each with its own
+  palette and a night tint; which one a pet gets is rolled at birth
+- a **poop sprite**, drawn in the body palette
+- a **temperament**: per-stat decay multipliers, so a class is a behaviour and
+  not just a recolour
+
+### Pages
+
+Two kinds.
+
+**Declarative** — a title, an icon id, and rows naming what to show. Enough
+for an information screen, no logic:
+
+```python
+rows = [
+    (SPRITE, SRC["none"], ""),
+    (STRING, SRC["species_name"], "CLASS"),
+    (BAR,    SRC["health"],       "HP"),
+    (VALUE,  SRC["age_s"],        "AGE"),
+]
+```
+
+**Bytecode** — a real program with branching, arithmetic, its own state and
+input handling, assembled by `tools/vmasm.py`:
+
+```
+update:                  ; args: 0 = dt_ms, 1 = button edge mask
+  arg 1
+  push $BTN_RT
+  and
+  jz done
+  sysv act $ACT_FEED     ; push args, call, keep the result
+  jz done
+  emote "happy"
+done:
+  ret 1                  ; non-zero keeps the page open
+
+render:
+  fill $PANEL
+  text 84 6 "VITALS" $WHITE 2
+  sprite 34 74 1
+  push 58
+  push 103
+  push 150
+  push 9
+  sysv get $SRC_FED      ; push a value...
+  dup
+  sysk levelcol          ; ...and derive a colour from it
+  sys bar
+  ret 1
+```
+
+Three call forms, and mixing them up is the easy mistake:
+
+| form | pushes args | keeps result |
+|---|---|---|
+| `text 8 8 "HI" $WHITE 2` | yes | no (dropped) |
+| `sysv get $SRC_HEALTH` | yes | yes |
+| `sysk levelcol` | no, already on the stack | yes |
+
+Page hooks are `enter`, `update(dt, buttons)`, `render` and `leave`. Any may
+be omitted. `RB` always closes a page before the page sees it, so no page can
+trap the user.
+
+### Background hooks
+
+A pack may declare handlers that run **whether or not any of its pages are
+open** — this is what makes a pack a module rather than a screen:
+
+```
+on_event:                ; args: 0 = event type, 1 = a, 2 = b, 3 = age_s
+  arg 0
+  push $EV_POOPED
+  eq
+  jz done
+  loadg 3                ; module globals, shared with this pack's pages
+  push 1
+  add
+  storeg 3
+done:
+  ret 1
+```
+
+Subscribe by mask when you emit the hook. Available events:
+
+`MINUTE` · `FED` · `PLAYED` · `CLEANED` · `POOPED` · `HUNGRY` · `SAD` ·
+`DIRTY` · `SICK` · `RECOVERED` · `FELL_ASLEEP` · `WOKE` · `DIED` · `REBORN` ·
+`DISPLAY_ON` · `DISPLAY_OFF` · `ATTENTION` · `BUTTON`
+
+Need events latch with hysteresis, so `HUNGRY` fires once per episode rather
+than every frame.
+
+A hook runs with **no framebuffer**, so drawing syscalls are no-ops. What it
+can do is read the pet, apply actions, play a pose, and call `nudge <ms>` to
+ask for the screen. Globals are module-wide and shared with the pack's pages,
+so a page can display what the hook counted while it was closed.
+
+### Sandboxing
+
+Loaded bytecode is untrusted code on a device with no memory protection, so:
+
+- no raw memory access — the framebuffer is reachable only through drawing
+  syscalls, which clip
+- every jump target, local, global, string id, syscall id and arity is
+  verified at load; code that fails is never run
+- **operand-stack depth is tracked through every path** at load time, which
+  catches the commonest authoring mistake: calling a syscall without pushing
+  its arguments
+- an instruction budget per hook, so a runaway page cannot hang the device
+
+Native code cannot be loaded. There is no dynamic linker and one bad pointer
+takes the board down; bytecode gives modules genuine behaviour without that
+risk.
+
+---
+
+## Layout
+
+```
+components/epet_core/   everything platform-independent
+  epet_state.c            the simulation: needs, health, sleep, display power
+  epet_event.[ch]         publish/subscribe bus, no allocation
+  epet_draw.[ch]          framebuffer primitives and a 5x7 font
+  epet_sprite.[ch]        transparent blitter
+  epet_species.[ch]       character classes, poses, animation player
+  epet_ui.[ch]            menu, scrolling, page lifecycle
+  epet_pages.c            built-in sub-programs
+  epet_vm.[ch]            bytecode VM and its validator
+  epet_modblob.[ch]       .epmod parser
+  epet_link.[ch]          install protocol (transport agnostic)
+  epet_save.[ch]          persistence
+main/                   ESP32 platform: LCD, buttons, IMU, BLE, OTA, storage
+sim/                    macOS/Linux platform: SDL2 window, file storage
+tools/                  sprite generator, bytecode assembler, pack builder
+web/                    the browser installer
+tests/                  eight suites, host-run
+```
+
+The firmware and the simulator compile the **same** `epet_core` sources, so
+they cannot drift. New behaviour belongs in `epet_core`, never in a platform
+layer.
+
+---
+
+## Hardware notes
+
+Details that cost real debugging time are in [CLAUDE.md](CLAUDE.md): the LCD's
+80-row GRAM offset, why flashing only works over the UART bridge, the IMU's
+I²C timeout trap, and why shake detection measures sample-to-sample change
+rather than deviation from gravity.
+
+## Licence
+
+MIT

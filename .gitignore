@@ -1,0 +1,20 @@
+# ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# simulator
+sim/epet_sim
+sim/test_power
+sim/test_events
+sim/test_ui
+sim/test_character
+sim/test_modules
+sim/test_save
+sim/test_vm
+sim/test_link
+sim/*.bmp
+sim/*.dSYM/
+sim/.save/

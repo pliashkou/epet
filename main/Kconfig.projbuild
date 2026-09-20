@@ -1,0 +1,212 @@
+menu "epet configuration"
+
+    config EPET_DISPLAY_TIMEOUT_MS
+        int "Display blank timeout (ms)"
+        default 30000
+        range 0 3600000
+        help
+            Blank the LCD after this many milliseconds with no button
+            activity. The pet keeps living while the panel sleeps; only the
+            display is powered down. A button press wakes the display and is
+            swallowed, so it does not also trigger an action.
+
+            Set to 0 to keep the display on permanently.
+
+    config EPET_LIGHT_SLEEP
+        bool "Enter light sleep while the display is blanked"
+        default y
+        help
+            Halt the CPU with esp_light_sleep_start() while the panel is off,
+            waking on a button GPIO going low. Cuts idle current by roughly an
+            order of magnitude versus simply polling.
+
+            The pet is not paused: esp_timer is compensated across light
+            sleep, so the elapsed time is replayed through epet_advance() on
+            wake and hunger/age catch up correctly.
+
+            Disable to fall back to polling at EPET_IDLE_POLL_MS.
+
+    config EPET_WAKE_INTERVAL_MS
+        int "Periodic wake interval while asleep (ms, 0 = GPIO only)"
+        default 60000
+        range 0 3600000
+        help
+            While in light sleep, also wake on a timer this often to advance
+            the simulation and let modules react -- poops appear, needs cross
+            their thresholds, and the care module can ask for attention.
+
+            The display is NOT turned on by a timer wake; only a button press
+            or an explicit alert does that. Set to 0 for GPIO-only wake, in
+            which case nothing happens until the user presses something.
+
+    config EPET_MENU_HIDE_MS
+        int "Hide the menu overlay after this long unused (ms, 0 = never)"
+        default 5000
+        range 0 600000
+        help
+            The menu floats over the scene and fades out when unused, leaving
+            the pet unobstructed. LT or LB brings it back; that reveal press
+            is consumed, so it never also moves the cursor or opens a page.
+
+    config EPET_AUTOSAVE_MS
+        int "Minimum gap between automatic saves (ms)"
+        default 30000
+        range 1000 3600000
+        help
+            The pet is written to NVS at most this often, and only when
+            something actually changed. It is also flushed just before
+            entering light sleep, since the next wake may be minutes away.
+
+    config EPET_ALERT_SHOW_MS
+        int "How long an attention alert lights the screen (ms)"
+        default 4000
+        range 500 60000
+
+    config EPET_CARE_INTERVAL_MS
+        int "Minimum gap between attention alerts (ms)"
+        default 120000
+        range 1000 3600000
+        help
+            Rate limit so an unmet need nags at most this often.
+
+    config EPET_IDLE_POLL_MS
+        int "Button poll interval while display is asleep (ms)"
+        default 120
+        range 20 1000
+        help
+            Used only when EPET_LIGHT_SLEEP is disabled. While the panel is
+            blanked there is nothing to draw, so the main loop slows to this
+            interval instead of the ~33 ms render cadence.
+
+    config EPET_SHAKE_WAKE
+        bool "Wake the display when the device is shaken"
+        default y
+        help
+            Reads the onboard QMI8658 accelerometer and lights the screen
+            when the pet is picked up or shaken.
+
+    config EPET_SHAKE_THRESHOLD_MG
+        int "Shake threshold (milli-g of change between samples)"
+        default 300
+        range 80 2000
+        depends on EPET_SHAKE_WAKE
+        help
+            How much the accelerometer must change between two samples.
+            At rest this reads a few mg; a deliberate shake reads several
+            hundred. Lower is twitchier.
+
+    config EPET_SHAKE_HOLD_MS
+        int "How long the shaking must continue to count (ms)"
+        default 2000
+        range 0 10000
+        depends on EPET_SHAKE_WAKE
+        help
+            A single knock should not wake the pet. Movement has to keep
+            exceeding the threshold for roughly this long before the screen
+            lights. Credit builds while the board is moving and drains at
+            half rate while it is still, so brief pauses mid-shake do not
+            reset it but a one-off bump fades away.
+
+            Set to 0 to wake on the first qualifying movement.
+
+    config EPET_REVIVE_HOLD_MS
+        int "How long to shake a dead pet to start a new one (ms)"
+        default 5000
+        range 0 30000
+        depends on EPET_SHAKE_WAKE
+        help
+            Longer than the wake hold: ending a pet's afterlife and rolling a
+            new class should take more than an accidental jostle. The screen
+            lights at the normal wake hold so there is visible feedback that
+            shaking is doing something, and the new pet arrives at this one.
+
+    config EPET_SHAKE_CONFIRM_MS
+        int "Poll interval while a possible shake is in progress (ms)"
+        default 120
+        range 40 1000
+        depends on EPET_SHAKE_WAKE
+        help
+            Once movement is seen, sampling speeds up to judge whether it is
+            sustained. Polling at the idle rate would need several seconds to
+            collect enough samples, and would miss the gaps in a real shake.
+
+    config EPET_SHAKE_POLL_MS
+        int "How often to check for movement while asleep (ms)"
+        default 400
+        range 100 5000
+        depends on EPET_SHAKE_WAKE
+        help
+            While the screen is blanked the CPU is in light sleep, so the
+            accelerometer can only be read on a timer wake. This is the
+            responsiveness/battery trade: each wake is a few milliseconds of
+            CPU plus one I2C read.
+
+            Set EPET_IMU_INT_GPIO instead if you know which pin the IMU's
+            interrupt line reaches; that wakes on motion with no polling.
+
+    config EPET_IMU_INT_GPIO
+        int "IMU interrupt GPIO (-1 = poll instead)"
+        default -1
+        range -1 48
+        depends on EPET_SHAKE_WAKE
+        help
+            The schematic names IMU_INT1/IMU_INT2 but does not say which
+            GPIO they reach, and the vendor header is wrong about this part
+            elsewhere, so this is not set by default. If you confirm the pin,
+            set it here: the device then wakes on the IMU's own motion
+            interrupt and does no polling at all.
+
+    config EPET_IMU_SCAN
+        bool "Scan for the IMU if it is not where expected"
+        default n
+        depends on EPET_SHAKE_WAKE
+        help
+            Probes candidate SDA/SCL pin pairs at boot and logs any I2C
+            device found. Diagnostic: turn it off once the pins are known.
+
+    config EPET_BLE
+        bool "Expose the module link over Bluetooth LE"
+        default y
+        help
+            Advertises a Nordic UART Service carrying the same '#' line
+            protocol as the serial link, so a browser can install modules
+            over Web Bluetooth instead of Web Serial.
+
+            Costs roughly 200 KB of flash and 40 KB of RAM. The device stays
+            awake while a central is connected, since light sleep would stop
+            it servicing the link.
+
+    menu "Button GPIOs"
+        comment "Buttons are positional: two on each side of the screen."
+        comment "Set to -1 for a button that is not wired."
+
+        config EPET_BTN_LT_GPIO
+            int "Left top (feed)"
+            default 1
+            range -1 48
+
+        config EPET_BTN_LB_GPIO
+            int "Left bottom (play)"
+            default 2
+            range -1 48
+
+        config EPET_BTN_RT_GPIO
+            int "Right top (clean)"
+            default 5
+            range -1 48
+
+        config EPET_BTN_RB_GPIO
+            int "Right bottom (confirm)"
+            default 6
+            range -1 48
+
+        config EPET_BOOT_AS_LT
+            bool "Also treat the onboard BOOT button (GPIO0) as Left-top"
+            default y
+            help
+                Lets the board be exercised before any buttons are wired.
+                Turn this off once real buttons are fitted, or GPIO0 will
+                double up as feed.
+    endmenu
+
+endmenu

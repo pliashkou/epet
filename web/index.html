@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>epet modules</title>
+<style>
+  :root {
+    --bg: #12151c; --panel: #1a1f2a; --line: #2b3342; --ink: #e8edf5;
+    --dim: #93a0b5; --accent: #5aa2e0; --good: #5ad26e; --bad: #e05a5a;
+    --warn: #e0b45a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  h1 { font-size: 16px; margin: 0; letter-spacing: .12em; }
+  nav { display: flex; gap: 4px; margin-left: auto; }
+  nav button, .btn {
+    background: #222836; color: var(--ink); border: 1px solid var(--line);
+    padding: 7px 14px; border-radius: 6px; cursor: pointer; font: inherit;
+  }
+  nav button.on { background: var(--accent); border-color: var(--accent); color: #08111c; }
+  .btn:hover:not(:disabled) { border-color: var(--accent); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #08111c; }
+  main { padding: 20px; max-width: 860px; margin: 0 auto; }
+  section { display: none; }
+  section.on { display: block; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px; margin-bottom: 14px;
+  }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  .muted { color: var(--dim); }
+  .tag {
+    font-size: 11px; padding: 2px 7px; border-radius: 99px;
+    border: 1px solid var(--line); color: var(--dim);
+  }
+  .tag.loaded { color: var(--good); border-color: var(--good); }
+  .tag.builtin { color: var(--dim); }
+  #status { font-size: 12px; color: var(--dim); }
+  #status.ok { color: var(--good); }
+  #status.err { color: var(--bad); }
+  .drop {
+    border: 2px dashed var(--line); border-radius: 10px; padding: 30px;
+    text-align: center; color: var(--dim); cursor: pointer;
+  }
+  .drop.hot { border-color: var(--accent); color: var(--ink); }
+  progress { width: 100%; height: 6px; }
+  pre#log {
+    background: #0c0f15; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; max-height: 220px; overflow: auto; font-size: 12px;
+    color: var(--dim); white-space: pre-wrap; margin: 0;
+  }
+  .warn { color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>EPET MODULES</h1>
+  <nav>
+    <button id="tabInstall" class="on">Install</button>
+    <button id="tabManage">Manage</button>
+    <button id="tabFirmware">Firmware</button>
+  </nav>
+  <div class="row" style="width:100%">
+    <button id="connect" class="btn primary">Connect by cable</button>
+    <button id="connectBle" class="btn">Connect by Bluetooth</button>
+    <button id="disconnect" class="btn" disabled>Disconnect</button>
+    <span id="status">not connected</span>
+  </div>
+</header>
+
+<main>
+  <section id="pageInstall" class="on">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <strong class="grow">Install a module</strong>
+        <a class="btn" href="spark.epmod" download>Download sample pack</a>
+      </div>
+      <div id="drop" class="drop">
+        Drop an <code>.epmod</code> file here, or click to choose one
+        <input id="file" type="file" accept=".epmod,.bin" hidden>
+      </div>
+      <div id="picked" class="muted" style="margin-top:12px">No file selected.</div>
+      <div class="row" style="margin-top:12px">
+        <button id="install" class="btn primary" disabled>Install to device</button>
+        <progress id="prog" value="0" max="1" hidden></progress>
+      </div>
+    </div>
+    <div class="card">
+      <strong>What a module can contain</strong>
+      <p class="muted" style="margin:8px 0 0">
+        Characters (sprites, animations, backdrops, temperament) and
+        sub-programs. A sub-program can be a described layout, or real
+        <strong>bytecode</strong> &mdash; branching, arithmetic, its own state,
+        and buttons that do things. It runs in a sandboxed VM: no raw memory
+        access, every jump and index checked before it loads, and an
+        instruction budget so a loaded page cannot hang the device.
+      </p>
+    </div>
+  </section>
+
+  <section id="pageManage">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <strong class="grow">Installed on device</strong>
+        <button id="refresh" class="btn" disabled>Refresh</button>
+      </div>
+      <table id="mods"><tbody></tbody></table>
+      <p id="noMods" class="muted">Connect to read the device.</p>
+    </div>
+    <div class="card">
+      <p class="muted" style="margin:0 0 8px">
+        <strong>Bluetooth:</strong> the radio is off until you open
+        <em>UPDATE</em> on the pet's own menu. Leaving that page turns it off
+        again, so the device is not discoverable while it is just being a pet.
+      </p>
+      <p class="muted" style="margin:0">
+        Removing a module deletes its characters. If the pet currently <em>is</em>
+        one of them, the device starts a new pet from whatever remains.
+      </p>
+    </div>
+  </section>
+
+  <section id="pageFirmware">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <strong class="grow">Firmware on device</strong>
+        <button id="fwInfo" class="btn" disabled>Read version</button>
+      </div>
+      <div id="fwCurrent" class="muted">Connect to read the running firmware.</div>
+    </div>
+    <div class="card">
+      <strong>Install new firmware</strong>
+      <div id="fwDrop" class="drop" style="margin-top:10px">
+        Drop a firmware <code>.bin</code> here, or click to choose one
+        <input id="fwFile" type="file" accept=".bin" hidden>
+      </div>
+      <div id="fwPicked" class="muted" style="margin-top:12px">No file selected.</div>
+      <div class="row" style="margin-top:12px">
+        <button id="fwInstall" class="btn primary" disabled>Flash to device</button>
+        <progress id="fwProg" value="0" max="1" hidden></progress>
+      </div>
+      <p class="muted" style="margin:12px 0 0">
+        The image goes into the spare app slot, so the running firmware is
+        untouched until it verifies. The device reboots into the new one and
+        marks it good only after it starts; if it fails to boot, the
+        bootloader falls back to the previous slot.
+        Build with <code>idf.py build</code> and pick
+        <code>build/epet.bin</code>.
+      </p>
+    </div>
+  </section>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:8px">
+      <strong class="grow">Log</strong>
+      <button id="clearLog" class="btn">Clear</button>
+    </div>
+    <pre id="log"></pre>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const CHUNK = 480;              // base64 chars per line (360 bytes)
+
+// One protocol, two pipes. `send` and the line parser do not care which.
+let transport = null;           // 'serial' | 'ble'
+let port = null, writer = null, reader = null;
+let bleDevice = null, bleRx = null, bleTx = null;
+let rxLine = '', waiters = [], packet = null;
+
+const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_RX      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';  // we write here
+const NUS_TX      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';  // device notifies
+
+function connected() { return transport !== null; }
+
+function log(msg, cls) {
+  const el = $('#log');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+function status(msg, cls) {
+  $('#status').textContent = msg;
+  $('#status').className = cls || '';
+}
+
+/* ---- serial ---------------------------------------------------------- */
+
+/* ---- bluetooth ------------------------------------------------------- */
+
+async function connectBle() {
+  if (!('bluetooth' in navigator)) {
+    status('Web Bluetooth unavailable — use Chrome or Edge over https/localhost', 'err');
+    return;
+  }
+  try {
+    log('> requesting device (put the pet in UPDATE mode first)');
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [NUS_SERVICE] }],
+      optionalServices: [NUS_SERVICE],
+    });
+    bleDevice.addEventListener('gattserverdisconnected', () => {
+      if (transport === 'ble') { log('bluetooth link dropped', 'warn'); teardown(); }
+    });
+
+    const server = await bleDevice.gatt.connect();
+    const svc = await server.getPrimaryService(NUS_SERVICE);
+    bleRx = await svc.getCharacteristic(NUS_RX);
+    bleTx = await svc.getCharacteristic(NUS_TX);
+
+    const dec = new TextDecoder();
+    await bleTx.startNotifications();
+    bleTx.addEventListener('characteristicvaluechanged', e => {
+      rxLine += dec.decode(e.target.value);
+      let i;
+      while ((i = rxLine.search(/[\r\n]/)) >= 0) {
+        const line = rxLine.slice(0, i);
+        rxLine = rxLine.slice(i + 1);
+        if (line.trim()) onLine(line.trim());
+      }
+    });
+
+    transport = 'ble';
+    afterConnect('bluetooth');
+  } catch (e) {
+    if (e.name === 'NotFoundError') status('no device chosen', '');
+    else status('bluetooth failed: ' + e.message, 'err');
+  }
+}
+
+async function afterConnect(how) {
+  $('#connect').disabled = true;
+  $('#connectBle').disabled = true;
+  $('#disconnect').disabled = false;
+  $('#refresh').disabled = false;
+  $('#fwInfo').disabled = false;
+  $('#install').disabled = !packet;
+  $('#fwInstall').disabled = !fwImage;
+  status('connected over ' + how, 'ok');
+  log('> connected over ' + how);
+
+  let pong = null;
+  for (let i = 0; i < 4 && !pong; i++) {
+    pong = await request('#PING', l => l.startsWith('#PONG'), 1500).catch(() => null);
+  }
+  if (pong) {
+    log('< ' + pong);
+    await listModules();
+  } else {
+    status('device not responding', 'err');
+    log('no reply after 4 pings. Over Bluetooth, check the pet is on the ' +
+        'UPDATE page. Over cable, check nothing else holds the port.', 'warn');
+  }
+}
+
+function teardown() {
+  transport = null;
+  bleRx = bleTx = null;
+  $('#connect').disabled = false;
+  $('#connectBle').disabled = false;
+  $('#disconnect').disabled = true;
+  $('#refresh').disabled = true;
+  $('#fwInfo').disabled = true;
+  $('#install').disabled = true;
+  $('#fwInstall').disabled = true;
+  status('not connected');
+}
+
+/* ---- serial ---------------------------------------------------------- */
+
+async function connect() {
+  if (!('serial' in navigator)) {
+    status('Web Serial unavailable — use Chrome or Edge over https/localhost', 'err');
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+
+    // On this board the USB-UART bridge drives EN from RTS and IO0 from DTR
+    // (the standard esptool auto-reset circuit). Chrome asserts both when it
+    // opens the port, which holds the ESP32 in reset -- the device looks dead
+    // and never answers. Release them before talking to it.
+    try {
+      await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+    } catch (e) {
+      log('could not clear DTR/RTS: ' + e.message, 'warn');
+    }
+
+    writer = port.writable.getWriter();
+    readLoop();
+    transport = 'serial';
+    await afterConnect('cable');
+  } catch (e) {
+    status('connect failed: ' + e.message, 'err');
+  }
+}
+
+async function disconnect() {
+  try {
+    if (transport === 'ble') {
+      if (bleDevice && bleDevice.gatt.connected) bleDevice.gatt.disconnect();
+    } else {
+      // Leave the board running rather than parked in reset.
+      if (port) await port.setSignals({ dataTerminalReady: false, requestToSend: false })
+                          .catch(() => {});
+      if (reader) { await reader.cancel().catch(() => {}); reader = null; }
+      if (writer) { writer.releaseLock(); writer = null; }
+      if (port) { await port.close(); port = null; }
+    }
+  } catch (e) { /* closing a gone link is fine */ }
+  teardown();
+  log('> disconnected');
+}
+
+async function readLoop() {
+  const dec = new TextDecoder();
+  reader = port.readable.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      rxLine += dec.decode(value, { stream: true });
+      let i;
+      while ((i = rxLine.search(/[\r\n]/)) >= 0) {
+        const line = rxLine.slice(0, i);
+        rxLine = rxLine.slice(i + 1);
+        if (line.trim()) onLine(line.trim());
+      }
+    }
+  } catch (e) {
+    log('read stopped: ' + e.message, 'warn');
+  } finally {
+    try { reader.releaseLock(); } catch (e) {}
+  }
+}
+
+function onLine(line) {
+  if (line.startsWith('#') && !line.startsWith('#A ') && !line.startsWith('#FA '))
+    log('< ' + line);
+  for (const w of waiters.slice()) {
+    if (w.match(line)) {
+      waiters.splice(waiters.indexOf(w), 1);
+      clearTimeout(w.timer);
+      w.resolve(line);
+    }
+  }
+  if (collecting && line.startsWith('#MOD ')) collected.push(line);
+}
+
+async function send(text) {
+  const bytes = new TextEncoder().encode(text + '\n');
+  if (transport === 'serial') {
+    if (!writer) throw new Error('not connected');
+    await writer.write(bytes);
+    return;
+  }
+  if (transport === 'ble') {
+    if (!bleRx) throw new Error('not connected');
+    // A BLE write cannot exceed the negotiated MTU, so split long lines.
+    // The device reassembles on newlines exactly as it does over serial.
+    const MAX = 180;
+    for (let i = 0; i < bytes.length; i += MAX) {
+      const slice = bytes.slice(i, i + MAX);
+      if (bleRx.writeValueWithoutResponse) await bleRx.writeValueWithoutResponse(slice);
+      else await bleRx.writeValue(slice);
+    }
+    return;
+  }
+  throw new Error('not connected');
+}
+
+function waitFor(match, ms) {
+  return new Promise((resolve, reject) => {
+    const w = { match, resolve };
+    w.timer = setTimeout(() => {
+      waiters.splice(waiters.indexOf(w), 1);
+      reject(new Error('timed out'));
+    }, ms);
+    waiters.push(w);
+  });
+}
+
+async function request(cmd, match, ms) {
+  const p = waitFor(match, ms || 4000);
+  log('> ' + cmd);
+  await send(cmd);
+  return p;
+}
+
+/* ---- module list ------------------------------------------------------ */
+
+let collecting = false, collected = [];
+
+async function listModules() {
+  if (!connected()) return;
+  collected = []; collecting = true;
+  try {
+    await request('#LIST', l => l === '#END', 4000);
+  } catch (e) {
+    log('list failed: ' + e.message, 'warn');
+  }
+  collecting = false;
+  renderModules(collected.map(l => {
+    const [, id, version, species, pages, kind] = l.split(/\s+/);
+    return { id, version, species: +species, pages: +pages, kind };
+  }));
+}
+
+function renderModules(mods) {
+  const tb = $('#mods tbody');
+  tb.innerHTML = '';
+  $('#noMods').style.display = mods.length ? 'none' : 'block';
+  if (!mods.length && connected()) $('#noMods').textContent = 'No modules reported.';
+  for (const m of mods) {
+    const tr = document.createElement('tr');
+    const removable = m.id !== 'core';
+    tr.innerHTML = `
+      <td><strong>${m.id}</strong> <span class="tag ${m.kind}">${m.kind}</span></td>
+      <td class="muted">v${m.version}</td>
+      <td class="muted">${m.species} char / ${m.pages} page${m.pages === 1 ? '' : 's'}</td>
+      <td style="text-align:right"></td>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn danger';
+    btn.textContent = removable ? 'Remove' : 'built in';
+    btn.disabled = !removable;
+    btn.onclick = () => removeModule(m.id, btn);
+    tr.lastElementChild.appendChild(btn);
+    tb.appendChild(tr);
+  }
+}
+
+async function removeModule(id, btn) {
+  if (!confirm(`Remove "${id}" from the device?\n\nIts characters go with it. If the pet is one of them, a new pet will be started.`)) return;
+  btn.disabled = true;
+  btn.textContent = 'removing…';
+  try {
+    const reply = await request('#REMOVE ' + id,
+      l => l.startsWith('#OK') || l.startsWith('#ERR'), 6000);
+    if (reply.startsWith('#ERR')) throw new Error(reply.slice(5));
+    status('removed ' + id, 'ok');
+  } catch (e) {
+    status('remove failed: ' + e.message, 'err');
+  }
+  await listModules();
+}
+
+/* ---- install ---------------------------------------------------------- */
+
+// Must match epet_link_csum() on the device.
+function fletcher16(bytes) {
+  let a = 1, b = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    a = (a + bytes[i]) % 255;
+    b = (b + a) % 255;
+  }
+  return ((b << 8) | a) >>> 0;
+}
+
+function b64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+function describe(bytes) {
+  const dec = new TextDecoder();
+  if (bytes.length < 64 || dec.decode(bytes.slice(0, 5)) !== 'EPMOD') return null;
+  const cut = b => { const i = b.indexOf(0); return dec.decode(i < 0 ? b : b.slice(0, i)); };
+  const dv = new DataView(bytes.buffer, bytes.byteOffset);
+  return {
+    id: cut(bytes.slice(8, 20)),
+    name: cut(bytes.slice(20, 44)),
+    version: dv.getUint16(44, true),
+    species: bytes[49],
+    pages: bytes[50],
+    bytes: bytes.length,
+  };
+}
+
+function pickFile(file) {
+  file.arrayBuffer().then(buf => {
+    const bytes = new Uint8Array(buf);
+    const info = describe(bytes);
+    if (!info) {
+      $('#picked').innerHTML = '<span style="color:var(--bad)">Not an .epmod pack (bad header).</span>';
+      packet = null;
+      $('#install').disabled = true;
+      return;
+    }
+    packet = bytes;
+    $('#picked').innerHTML =
+      `<strong>${info.name}</strong> &nbsp; <span class="tag">${info.id}</span>
+       <span class="tag">v${info.version}</span><br>
+       <span class="muted">${info.species} character(s), ${info.pages} page(s),
+       ${(info.bytes / 1024).toFixed(1)} KB</span>`;
+    $('#install').disabled = !connected();
+  });
+}
+
+async function install() {
+  if (!packet || !connected()) return;
+  const prog = $('#prog');
+  prog.hidden = false; prog.value = 0; prog.max = 1;
+  $('#install').disabled = true;
+  try {
+    const ready = await request('#INSTALL ' + packet.length,
+      l => l.startsWith('#READY') || l.startsWith('#ERR'), 5000);
+    if (ready.startsWith('#ERR')) throw new Error(ready.slice(5));
+
+    // Chunk the BYTES so each piece can carry its own checksum; 3 bytes ->
+    // 4 base64 chars, so a byte count divisible by 3 keeps lines aligned.
+    const BYTES_PER = (CHUNK / 4) * 3;
+    const chunks = [];
+    for (let i = 0; i < packet.length; i += BYTES_PER) {
+      const slice = packet.slice(i, i + BYTES_PER);
+      chunks.push({ b64: b64(slice), csum: fletcher16(slice) });
+    }
+
+    // Chunks are numbered and individually acknowledged. Lines do get
+    // dropped on this link, so a missed chunk is retried rather than
+    // silently truncating the pack.
+    let seq = 0, retries = 0;
+    while (seq < chunks.length) {
+      const ack = waitFor(l => l.startsWith('#A ') || l.startsWith('#ERR'), 4000);
+      await send('#D ' + seq + ' ' + chunks[seq].csum + ' ' + chunks[seq].b64);
+      let r;
+      try {
+        r = await ack;
+      } catch (e) {
+        if (++retries > 200) throw new Error('too many dropped chunks');
+        continue;                        // no reply: send the same one again
+      }
+      if (r.startsWith('#ERR seq') || r.startsWith('#ERR csum')) {
+        seq = parseInt(r.split(/\s+/)[2], 10) || 0;   // resync / resend
+        retries++;
+        continue;
+      }
+      if (r.startsWith('#ERR')) throw new Error(r.slice(5));
+      seq = parseInt(r.split(/\s+/)[1], 10);
+      prog.value = seq / chunks.length;
+    }
+    if (retries) log('re-sent ' + retries + ' dropped chunk(s)', 'warn');
+    const done = await request('#DONE',
+      l => l.startsWith('#OK') || l.startsWith('#ERR'), 15000);
+    if (done.startsWith('#ERR')) throw new Error(done.slice(5));
+    prog.value = 1;
+    status('installed ' + done.slice(4).trim(), 'ok');
+    await listModules();
+  } catch (e) {
+    status('install failed: ' + e.message, 'err');
+    log('install failed: ' + e.message, 'warn');
+  }
+  $('#install').disabled = !packet || !connected();
+  setTimeout(() => { prog.hidden = true; }, 1200);
+}
+
+/* ---- firmware --------------------------------------------------------- */
+
+let fwImage = null;
+
+async function readFwInfo() {
+  if (!connected()) return;
+  try {
+    const r = await request('#FWINFO', l => l.startsWith('#FWINFO') || l.startsWith('#ERR'), 4000);
+    if (r.startsWith('#ERR')) throw new Error(r.slice(5));
+    const [, version, date, slot] = r.split(/\s+/);
+    $('#fwCurrent').innerHTML =
+      `<strong>${version}</strong> <span class="tag">built ${date}</span>
+       <span class="tag">running from ${slot}</span>`;
+  } catch (e) {
+    $('#fwCurrent').innerHTML =
+      '<span class="warn">could not read version: ' + e.message + '</span>';
+  }
+}
+
+function pickFirmware(file) {
+  file.arrayBuffer().then(buf => {
+    const bytes = new Uint8Array(buf);
+    // ESP32 images start with 0xE9. Catching this here saves a long upload
+    // that the device would reject at the very end.
+    if (bytes.length < 1024 || bytes[0] !== 0xE9) {
+      $('#fwPicked').innerHTML =
+        '<span style="color:var(--bad)">Not an ESP32 firmware image ' +
+        '(expected magic 0xE9). Pick build/epet.bin, not the project .elf.</span>';
+      fwImage = null;
+      $('#fwInstall').disabled = true;
+      return;
+    }
+    fwImage = bytes;
+    $('#fwPicked').innerHTML =
+      `<strong>${file.name}</strong>
+       <span class="muted">${(bytes.length / 1024).toFixed(0)} KB</span>`;
+    $('#fwInstall').disabled = !connected();
+  });
+}
+
+async function flashFirmware() {
+  if (!fwImage || !connected()) return;
+  if (!confirm(`Flash ${(fwImage.length / 1024).toFixed(0)} KB to the device?\n\n` +
+               `It will reboot when finished. Do not unplug during the transfer.`)) return;
+
+  const prog = $('#fwProg');
+  prog.hidden = false; prog.value = 0;
+  $('#fwInstall').disabled = true;
+  const started = Date.now();
+  try {
+    const ready = await request('#FW ' + fwImage.length,
+      l => l.startsWith('#FREADY') || l.startsWith('#ERR'), 8000);
+    if (ready.startsWith('#ERR')) throw new Error(ready.slice(5));
+    log('< ' + ready);
+
+    const BYTES_PER = (CHUNK / 4) * 3;
+    const chunks = [];
+    for (let i = 0; i < fwImage.length; i += BYTES_PER) {
+      const slice = fwImage.slice(i, i + BYTES_PER);
+      chunks.push({ b64: b64(slice), csum: fletcher16(slice) });
+    }
+
+    let seq = 0, retries = 0;
+    while (seq < chunks.length) {
+      const ack = waitFor(l => l.startsWith('#FA ') || l.startsWith('#ERR'), 6000);
+      await send('#FD ' + seq + ' ' + chunks[seq].csum + ' ' + chunks[seq].b64);
+      let r;
+      try { r = await ack; }
+      catch (e) {
+        if (++retries > 400) throw new Error('too many dropped chunks');
+        continue;
+      }
+      if (r.startsWith('#ERR seq') || r.startsWith('#ERR csum')) {
+        seq = parseInt(r.split(/\s+/)[2], 10) || 0; retries++; continue;
+      }
+      if (r.startsWith('#ERR')) throw new Error(r.slice(5));
+      seq = parseInt(r.split(/\s+/)[1], 10);
+      prog.value = seq / chunks.length;
+    }
+
+    const done = await request('#FDONE',
+      l => l.startsWith('#FOK') || l.startsWith('#ERR'), 20000);
+    if (done.startsWith('#ERR')) throw new Error(done.slice(5));
+    prog.value = 1;
+    const secs = ((Date.now() - started) / 1000).toFixed(0);
+    status('firmware installed in ' + secs + 's; device rebooting', 'ok');
+    log('< ' + done + '  (device is restarting — reconnect in a few seconds)');
+    // The reboot drops the link either way.
+    setTimeout(() => disconnect(), 800);
+  } catch (e) {
+    status('firmware update failed: ' + e.message, 'err');
+    log('firmware update failed: ' + e.message, 'warn');
+    await send('#FABORT').catch(() => {});
+    $('#fwInstall').disabled = !fwImage || !connected();
+  }
+  setTimeout(() => { prog.hidden = true; }, 1500);
+}
+
+/* ---- wiring ----------------------------------------------------------- */
+
+$('#connect').onclick = connect;
+$('#connectBle').onclick = connectBle;
+$('#disconnect').onclick = disconnect;
+$('#refresh').onclick = listModules;
+$('#install').onclick = install;
+$('#fwInstall').onclick = flashFirmware;
+$('#fwInfo').onclick = readFwInfo;
+
+const fwDrop = $('#fwDrop');
+fwDrop.onclick = () => $('#fwFile').click();
+$('#fwFile').onchange = e => { if (e.target.files[0]) pickFirmware(e.target.files[0]); };
+fwDrop.ondragover = e => { e.preventDefault(); fwDrop.classList.add('hot'); };
+fwDrop.ondragleave = () => fwDrop.classList.remove('hot');
+fwDrop.ondrop = e => {
+  e.preventDefault(); fwDrop.classList.remove('hot');
+  if (e.dataTransfer.files[0]) pickFirmware(e.dataTransfer.files[0]);
+};
+$('#clearLog').onclick = () => { $('#log').textContent = ''; };
+
+$('#tabInstall').onclick = () => showTab('Install');
+$('#tabManage').onclick = () => { showTab('Manage'); if (connected()) listModules(); };
+$('#tabFirmware').onclick = () => { showTab('Firmware'); if (connected()) readFwInfo(); };
+function showTab(which) {
+  for (const t of ['Install', 'Manage', 'Firmware']) {
+    $('#tab' + t).classList.toggle('on', t === which);
+    $('#page' + t).classList.toggle('on', t === which);
+  }
+}
+
+const drop = $('#drop');
+drop.onclick = () => $('#file').click();
+$('#file').onchange = e => { if (e.target.files[0]) pickFile(e.target.files[0]); };
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('hot'); };
+drop.ondragleave = () => drop.classList.remove('hot');
+drop.ondrop = e => {
+  e.preventDefault(); drop.classList.remove('hot');
+  if (e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]);
+};
+
+if (!('serial' in navigator)) $('#connect').disabled = true;
+if (!('bluetooth' in navigator)) $('#connectBle').disabled = true;
+if (!('serial' in navigator) && !('bluetooth' in navigator)) {
+  status('Neither Web Serial nor Web Bluetooth is available — use Chrome or ' +
+         'Edge over https or localhost', 'err');
+}
+</script>
+</body>
+</html>
