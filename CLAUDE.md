@@ -22,12 +22,16 @@ ESP32-S3-LCD-1.47 board's pins — do not copy pinouts between Waveshare models.
 | LCD CS | 39 |
 | LCD DC | 38 |
 | LCD RST | 42 |
-| LCD backlight | 4 |
+| LCD backlight (BL_PWM) | 20 |
 | I2C SDA / SCL (IMU) | 47 / 48 |
 | BOOT button (active-low) | 0 |
 
-Free for expansion: GPIO 1-3, 5-21. No user buttons are fitted on the board;
-only BOOT and RESET exist.
+Free for expansion: GPIO 1-3, 5-18, 21. **GPIO 19 and 20 are not free** --
+the schematic uses them for `RST_Control` and `BL_PWM`. GPIO4 is unused --
+the vendor factory program calls it the backlight and is simply wrong. The
+same vendor header's other claim, `lcd_bl 20`, is the correct one; it was
+dismissed here as a typo for a long time. No user buttons are fitted on the
+board; only BOOT and RESET exist.
 
 ### ST7789 quirks
 
@@ -568,22 +572,39 @@ Three separate bugs here came from that, each presenting as something else:
 When something times out, stalls or samples nothing, check the tick maths
 before suspecting the hardware.
 
-### The backlight cannot be switched off
+### The backlight is GPIO20, behind the USB PHY
 
-Not in software, on this board revision. The vendor's factory program drives
-GPIO4 as the backlight; driving it here changes nothing. A sweep of GPIO4 plus
-17 other unassigned pins, both polarities, with the pin number drawn on the
-panel so it could be read from the device, never dimmed it. It is wired to the
-rail. (The same vendor header also claimed `lcd_bl 20`, which is wrong too.)
+`BL_PWM` on GPIO20 goes through a 1K resistor into Q5 (an MMBT3904) whose
+collector feeds the panel's `LEDA`. **Active high.** Confirmed in the vendor
+[schematic](https://files.waveshare.com/wiki/ESP32-S3-LCD-1.3/ESP32S3_1.3inch.pdf).
 
-`lcd_set_power(false)` therefore **paints the framebuffer black before turning
-the controller off**. The panel still emits, but it is a dark rectangle rather
-than a glowing picture. That is the only dimming available; switching it
-properly needs a transistor on a spare GPIO.
+The catch, and it is a good one: **GPIO19 and 20 are the ESP32-S3's native
+USB D-/D+**, and the ROM leaves `USB_SERIAL_JTAG_CONF0_REG.USB_PAD_ENABLE`
+set, which lets the USB PHY drive both pads through the GPIO matrix. Until
+that bit is cleared, every `gpio_set_level()` on GPIO20 is accepted and
+silently discarded. So:
 
-Do not spend another afternoon on `gpio_hold_en()`, `gpio_sleep_sel_dis()` or
-the sleep GPIO workaround for this. Probe whether the pin does anything at all
-first -- that test takes one flash.
+```c
+usb_serial_jtag_ll_phy_enable_pad(false);   /* hal/usb_serial_jtag_ll.h */
+gpio_reset_pin(PIN_BL);
+```
+
+Clearing it costs nothing here: the Type-C port is wired to the CH343P
+bridge, not to the chip's own USB, and flashing goes over the UART anyway.
+
+This wasted an afternoon, and the reason is worth remembering. A sweep of 18
+pins in both polarities "proved" the backlight was hardwired to the rail --
+and **GPIO20 was in that sweep**. A negative result from a sweep only rules a
+pin out if the writes actually reach it; a peripheral holding the pad looks
+exactly like a pin that does nothing. The vendor wiki said outright that the
+factory program turns the backlight off when the board is stood upright,
+which was flat evidence against "not switchable" and should have forced a
+re-check much sooner. When a measurement contradicts the documentation,
+suspect the measurement.
+
+`lcd_set_power(false)` now drops the backlight first, then blanks GRAM (so a
+wake shows black rather than a stale pet for one frame), then sleeps the
+controller.
 
 ### Shake to wake
 

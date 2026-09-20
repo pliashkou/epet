@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "hal/usb_serial_jtag_ll.h"
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_vendor.h"
@@ -46,7 +47,7 @@ static const char *TAG = "epet";
 #define PIN_CS       39
 #define PIN_DC       38
 #define PIN_RST      42
-#define PIN_BL       4
+#define PIN_BL       20         /* BL_PWM -> Q5 (MMBT3904) -> LCD LEDA; active high */
 #define LCD_Y_GAP    80          /* 240x240 window sits 80 rows into the GRAM */
 #define LCD_CLOCK_HZ (40 * 1000 * 1000)
 
@@ -79,15 +80,27 @@ static epet_link_t     link;
 
 static void lcd_init(void)
 {
+    /* Release GPIO20 from the USB PHY before using it as the backlight.
+     *
+     * The schematic runs GP20 (BL_PWM) through a 1K resistor into Q5, an
+     * MMBT3904 whose collector feeds the panel's LEDA -- active high. But
+     * GPIO19/20 are the ESP32-S3's native USB D-/D+, and the ROM leaves
+     * USB_SERIAL_JTAG_CONF0_REG.USB_PAD_ENABLE set, which makes the USB PHY
+     * drive both pads THROUGH the GPIO matrix. Every gpio_set_level() on 20
+     * is silently discarded until this bit is cleared.
+     *
+     * That is why an earlier pin sweep "proved" the backlight was hardwired:
+     * GPIO20 was in the sweep, and the writes never reached the pin. Nothing
+     * is lost by clearing it -- the Type-C port goes to the CH343P bridge,
+     * not to the chip's own USB -- and we already flash over the UART. */
+    usb_serial_jtag_ll_phy_enable_pad(false);
+    gpio_reset_pin(PIN_BL);
+
     gpio_config_t bl = { .mode = GPIO_MODE_OUTPUT, .pin_bit_mask = 1ULL << PIN_BL };
     ESP_ERROR_CHECK(gpio_config(&bl));
 
-    /* GPIO4 is the backlight in the vendor's own factory program, and on
-     * this board driving it changes nothing: a sweep of GPIO4 plus 17 other
-     * unassigned pins, both polarities, with the pin number shown on the
-     * panel, never dimmed it. The backlight is wired to the rail and is not
-     * switchable in software here. The pin is still driven in case a board
-     * revision does wire it, but do not expect it to darken anything. */
+    /* Hold the level through light sleep, or the pad reverts and the panel
+     * lights back up while the CPU is halted. */
     ESP_ERROR_CHECK(gpio_sleep_sel_dis(PIN_BL));
 
     spi_bus_config_t buscfg = {
@@ -129,16 +142,15 @@ static void lcd_set_power(bool on)
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
         gpio_set_level(PIN_BL, 1);
     } else {
-        /* Paint the panel black before switching it off.
-         *
-         * The backlight cannot be turned off on this board, so whatever the
-         * controller still holds keeps being lit. Blanking first is the
-         * difference between a glowing picture of a pet and a dark
-         * rectangle -- the only dimming available here. */
+        /* Backlight first: it is the only thing the eye actually sees go
+         * dark, and it is instant. */
+        gpio_set_level(PIN_BL, 0);
+
+        /* Then blank GRAM, so the next wake shows black rather than a stale
+         * pet for the frame between SLPOUT and the first flush. */
         for (int i = 0; i < EPET_W * EPET_H; i++) core_fb[i] = 0;
         lcd_flush();
 
-        gpio_set_level(PIN_BL, 0);
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, false));
         ESP_ERROR_CHECK(esp_lcd_panel_disp_sleep(panel, true));
     }
