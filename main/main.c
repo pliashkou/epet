@@ -23,6 +23,7 @@
 #include "epet_ui.h"
 #include "epet_pages.h"
 #include "epet_care.h"
+#include "epet_draw.h"
 #include "epet_module.h"
 #include "epet_save.h"
 #include "epet_store.h"
@@ -60,8 +61,12 @@ static const int btn_pins[EPET_BTN_COUNT] = {
 };
 
 static esp_lcd_panel_handle_t panel;
-static uint16_t *core_fb;   /* native-endian RGB565, written by epet_core */
-static uint16_t *dma_fb;    /* byte-swapped copy the ST7789 wants */
+/* One buffer, not two: epet_core writes panel-ready RGB565, so the render
+ * target IS the DMA source. That removed a 9.5 ms per-frame byte-swap and
+ * 115 KB of RAM. */
+static uint16_t *core_fb;
+
+static void lcd_flush(void);
 
 static epet_t      pet;
 static epet_bus_t  bus;
@@ -76,6 +81,14 @@ static void lcd_init(void)
 {
     gpio_config_t bl = { .mode = GPIO_MODE_OUTPUT, .pin_bit_mask = 1ULL << PIN_BL };
     ESP_ERROR_CHECK(gpio_config(&bl));
+
+    /* GPIO4 is the backlight in the vendor's own factory program, and on
+     * this board driving it changes nothing: a sweep of GPIO4 plus 17 other
+     * unassigned pins, both polarities, with the pin number shown on the
+     * panel, never dimmed it. The backlight is wired to the rail and is not
+     * switchable in software here. The pin is still driven in case a board
+     * revision does wire it, but do not expect it to darken anything. */
+    ESP_ERROR_CHECK(gpio_sleep_sel_dis(PIN_BL));
 
     spi_bus_config_t buscfg = {
         .mosi_io_num = PIN_MOSI, .miso_io_num = -1, .sclk_io_num = PIN_CLK,
@@ -116,6 +129,15 @@ static void lcd_set_power(bool on)
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
         gpio_set_level(PIN_BL, 1);
     } else {
+        /* Paint the panel black before switching it off.
+         *
+         * The backlight cannot be turned off on this board, so whatever the
+         * controller still holds keeps being lit. Blanking first is the
+         * difference between a glowing picture of a pet and a dark
+         * rectangle -- the only dimming available here. */
+        for (int i = 0; i < EPET_W * EPET_H; i++) core_fb[i] = 0;
+        lcd_flush();
+
         gpio_set_level(PIN_BL, 0);
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, false));
         ESP_ERROR_CHECK(esp_lcd_panel_disp_sleep(panel, true));
@@ -124,10 +146,7 @@ static void lcd_set_power(bool on)
 
 static void lcd_flush(void)
 {
-    for (int i = 0; i < EPET_W * EPET_H; i++) {
-        dma_fb[i] = __builtin_bswap16(core_fb[i]);
-    }
-    esp_lcd_panel_draw_bitmap(panel, 0, 0, EPET_W, EPET_H, dma_fb);
+    esp_lcd_panel_draw_bitmap(panel, 0, 0, EPET_W, EPET_H, core_fb);
 }
 
 /* ---- buttons --------------------------------------------------------- */
@@ -362,9 +381,9 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "epet booting");
 
-    core_fb = heap_caps_malloc(EPET_W * EPET_H * sizeof(uint16_t), MALLOC_CAP_DEFAULT);
-    dma_fb  = heap_caps_malloc(EPET_W * EPET_H * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (!core_fb || !dma_fb) {
+    /* DMA-capable: the panel transfers straight out of it. */
+    core_fb = heap_caps_malloc(EPET_W * EPET_H * sizeof(uint16_t), MALLOC_CAP_DMA);
+    if (!core_fb) {
         ESP_LOGE(TAG, "framebuffer alloc failed");
         return;
     }
@@ -432,6 +451,7 @@ void app_main(void)
                  epet_load_result_name(lr));
     }
     pet.display_timeout_ms = CONFIG_EPET_DISPLAY_TIMEOUT_MS;
+    pet.revive_hold_ms     = CONFIG_EPET_REVIVE_HOLD_MS;
     /* Loaded modules get events without a pet pointer of their own. */
     epet_set_active(&pet);
 

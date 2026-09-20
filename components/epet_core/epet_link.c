@@ -156,6 +156,22 @@ static void cmd_install_done(epet_link_t *l)
     rx_free(l);
 }
 
+/* Throw the current creature away and roll a fresh one. The saved record is
+ * erased first: without that a reboot would resurrect the old pet, because
+ * the new one is only written when autosave next runs. */
+static void cmd_newpet(epet_link_t *l)
+{
+    epet_t *p = epet_active();
+    if (!p) { say(l, "#ERR nopet\n"); return; }
+
+    epet_clear_pet();
+    epet_bus_t *bus = p->bus;
+    epet_init(p);
+    p->bus = bus;
+    epet_save_pet(p);
+    sayf(l, "#OK %s\n", p->species ? p->species->name : "?");
+}
+
 static void cmd_remove(epet_link_t *l, const char *id)
 {
     if (!*id) { say(l, "#ERR noid\n"); return; }
@@ -185,6 +201,7 @@ static void handle(epet_link_t *l, char *line)
     if (sp) *sp = 0;
 
     if      (!strcmp(line, "#PING"))    sayf(l, "#PONG %d\n", EPET_LINK_PROTOCOL);
+    else if (!strcmp(line, "#NEWPET"))  cmd_newpet(l);
     else if (!strcmp(line, "#LIST"))    cmd_list(l);
     else if (!strcmp(line, "#INSTALL")) cmd_install_begin(l, arg);
     else if (!strcmp(line, "#D")) {

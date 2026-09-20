@@ -36,8 +36,10 @@ int main(void)
         CHECK(sp->scale >= 1, "%s: scale must be >= 1", sp->name);
         /* the four poses asked for */
         const char *want[] = { EPET_POSE_IDLE, EPET_POSE_BIRTH,
-                               EPET_POSE_HAPPY, EPET_POSE_SAD };
-        for (unsigned k = 0; k < 4; k++) {
+                               EPET_POSE_HAPPY, EPET_POSE_SAD,
+                               EPET_POSE_DEAD };
+        const unsigned n_want = sizeof want / sizeof want[0];
+        for (unsigned k = 0; k < n_want; k++) {
             const epet_pose_t *po = epet_species_pose(sp, want[k]);
             CHECK(po != NULL, "%s is missing pose '%s'", sp->name, want[k]);
             if (!po) continue;
@@ -53,7 +55,7 @@ int main(void)
         /* Nothing may touch the canvas edge: an opaque pixel on the
          * outermost row or column means the art ran off and was cut. This is
          * how SPROUT's leaf was being sliced off in the tall happy frames. */
-        for (unsigned k = 0; k < 4; k++) {
+        for (unsigned k = 0; k < n_want; k++) {
             const epet_pose_t *po = epet_species_pose(sp, want[k]);
             if (!po) continue;
             for (uint8_t fi = 0; fi < po->n_keys; fi++) {
@@ -278,6 +280,17 @@ int main(void)
     epet_apply_action(&pet, EPET_ACT_FEED);
     CHECK(strcmp(epet_actor_pose_name(&pet.actor), EPET_POSE_HAPPY) == 0,
           "feeding should play happy, got %s", epet_actor_pose_name(&pet.actor));
+
+    /* a dead pet plays its own pose, not a greyed idle frame */
+    epet_init(&pet);
+    pet.display_timeout_ms = 0;
+    for (int i = 0; i < 4000; i++) epet_update(&pet, 50, NONE, NONE);
+    CHECK(!pet.alive, "pet should be dead");
+    CHECK(strcmp(epet_actor_pose_name(&pet.actor), EPET_POSE_DEAD) == 0,
+          "a dead pet should play the dead pose, got %s",
+          epet_actor_pose_name(&pet.actor));
+    CHECK(epet_species_pose(pet.species, EPET_POSE_DEAD)->loop,
+          "the dead pose should loop");
 
     /* a miserable pet settles into sad on its own */
     epet_init(&pet);

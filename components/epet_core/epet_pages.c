@@ -11,73 +11,43 @@
 static void icon_feed(epet_page_t *self, uint16_t *fb, int cx, int cy,
                       uint16_t tint, bool sel)
 {
-    (void)self; (void)sel;
-    /* bowl with a rising morsel */
-    epet_disc(fb, cx, cy - 7, 4, tint);
-    epet_rect(fb, cx - 11, cy + 1, 22, 3, tint);
-    for (int i = -9; i <= 9; i++) {
-        int d = (9 - (i < 0 ? -i : i)) / 2;
-        epet_rect(fb, cx + i, cy + 4 + d, 2, 2, tint);
-    }
+    (void)self; (void)tint;
+    epet_icon_draw(fb, cx, cy, epet_icon("feed"), sel);
 }
 
 static void icon_play(epet_page_t *self, uint16_t *fb, int cx, int cy,
                       uint16_t tint, bool sel)
 {
-    (void)self; (void)sel;
-    /* Solid ball with blended seams. Punching the middle with a flat colour
-     * would show through the translucent menu as a hard dark hole. */
-    epet_disc(fb, cx, cy, 11, tint);
-    epet_shade(fb, cx - 10, cy - 1, 20, 2, EPET_C_BLACK, 150);
-    epet_shade(fb, cx - 1, cy - 10, 2, 20, EPET_C_BLACK, 150);
+    (void)self; (void)tint;
+    epet_icon_draw(fb, cx, cy, epet_icon("play"), sel);
 }
 
 static void icon_wash(epet_page_t *self, uint16_t *fb, int cx, int cy,
                       uint16_t tint, bool sel)
 {
-    (void)self; (void)sel;
-    /* droplet: a disc with a tapered top */
-    epet_disc(fb, cx, cy + 3, 8, tint);
-    for (int i = 0; i < 10; i++) {
-        int w = 1 + i * 8 / 10;
-        epet_rect(fb, cx - w / 2, cy - 8 + i, w, 1, tint);
-    }
+    (void)self; (void)tint;
+    epet_icon_draw(fb, cx, cy, epet_icon("wash"), sel);
 }
 
 static void icon_stats(epet_page_t *self, uint16_t *fb, int cx, int cy,
-                       uint16_t tint, bool sel)
+                      uint16_t tint, bool sel)
 {
-    (void)self; (void)sel;
-    static const int h[4] = { 5, 10, 7, 14 };
-    for (int i = 0; i < 4; i++) {
-        epet_rect(fb, cx - 11 + i * 6, cy + 8 - h[i], 4, h[i], tint);
-    }
+    (void)self; (void)tint;
+    epet_icon_draw(fb, cx, cy, epet_icon("stats"), sel);
 }
 
 static void icon_sleep(epet_page_t *self, uint16_t *fb, int cx, int cy,
-                       uint16_t tint, bool sel)
+                      uint16_t tint, bool sel)
 {
-    (void)self; (void)sel;
-    /* True crescent: plot only where the moon is and the bite is not, so
-     * nothing opaque is stamped over the translucent menu. */
-    const int r = 10, cut_r = 9, cut_dx = 5, cut_dy = -3;
-    for (int dy = -r; dy <= r; dy++) {
-        for (int dx = -r; dx <= r; dx++) {
-            if (dx * dx + dy * dy > r * r) continue;
-            int ex = dx - cut_dx, ey = dy - cut_dy;
-            if (ex * ex + ey * ey <= cut_r * cut_r) continue;
-            epet_rect(fb, cx + dx, cy + dy, 1, 1, tint);
-        }
-    }
+    (void)self; (void)tint;
+    epet_icon_draw(fb, cx, cy, epet_icon("sleep"), sel);
 }
 
 static void icon_about(epet_page_t *self, uint16_t *fb, int cx, int cy,
-                       uint16_t tint, bool sel)
+                      uint16_t tint, bool sel)
 {
-    (void)self; (void)sel;
-    epet_disc(fb, cx, cy, 11, tint);
-    epet_shade(fb, cx - 1, cy - 6, 3, 3, EPET_C_BLACK, 170);
-    epet_shade(fb, cx - 1, cy - 1, 3, 8, EPET_C_BLACK, 170);
+    (void)self; (void)tint;
+    epet_icon_draw(fb, cx, cy, epet_icon("about"), sel);
 }
 
 /* ---- shared chrome --------------------------------------------------- */
@@ -328,13 +298,10 @@ static void class_render(epet_page_t *self, const epet_t *pet, uint16_t *fb)
 }
 
 static void icon_class(epet_page_t *self, uint16_t *fb, int cx, int cy,
-                       uint16_t tint, bool sel)
+                      uint16_t tint, bool sel)
 {
-    (void)self; (void)sel;
-    /* two overlapping silhouettes: "pick a character" */
-    epet_disc(fb, cx - 4, cy + 1, 8, tint);
-    epet_shade(fb, cx - 12, cy - 7, 17, 17, EPET_C_BLACK, 90);
-    epet_disc(fb, cx + 5, cy - 2, 7, tint);
+    (void)self; (void)tint;
+    epet_icon_draw(fb, cx, cy, epet_icon("class"), sel);
 }
 
 static class_page_t page_class = {
@@ -383,12 +350,8 @@ static void home_render(epet_page_t *self, const epet_t *pet, uint16_t *fb)
 static void icon_home(epet_page_t *self, uint16_t *fb, int cx, int cy,
                       uint16_t tint, bool sel)
 {
-    (void)self; (void)sel;
-    /* little framed picture */
-    epet_rect(fb, cx - 11, cy - 9, 22, 18, tint);
-    epet_shade(fb, cx - 9, cy - 7, 18, 14, EPET_C_BLACK, 130);
-    epet_rect(fb, cx - 9, cy + 2, 18, 5, tint);
-    epet_disc(fb, cx + 4, cy - 3, 2, tint);
+    (void)self; (void)tint;
+    epet_icon_draw(fb, cx, cy, epet_icon("home"), sel);
 }
 
 static epet_page_t page_home = { .title = "HOME", .update = home_update,
@@ -451,13 +414,10 @@ static void modules_render(epet_page_t *self, const epet_t *pet, uint16_t *fb)
 }
 
 static void icon_modules(epet_page_t *self, uint16_t *fb, int cx, int cy,
-                         uint16_t tint, bool sel)
+                      uint16_t tint, bool sel)
 {
-    (void)self; (void)sel;
-    /* stacked blocks */
-    epet_rect(fb, cx - 10, cy - 9, 20, 5, tint);
-    epet_rect(fb, cx - 10, cy - 2, 20, 5, tint);
-    epet_rect(fb, cx - 10, cy + 5, 20, 5, tint);
+    (void)self; (void)tint;
+    epet_icon_draw(fb, cx, cy, epet_icon("mods"), sel);
 }
 
 static modules_page_t page_modules_impl = {

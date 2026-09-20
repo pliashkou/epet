@@ -85,8 +85,8 @@ bool epet_ui_open_titled(epet_ui_t *ui, epet_t *pet, const char *title);
  * whole screen and the pet stays centred whether the menu is up or not. */
 #define EPET_MENU_X     0
 #define EPET_MENU_W     44
-#define EPET_MENU_Y     48
-#define EPET_MENU_ROW_H 46
+#define EPET_MENU_Y     22
+#define EPET_MENU_ROW_H 52
 #define EPET_CONTENT_X  0
 #define EPET_CONTENT_W  EPET_W
 

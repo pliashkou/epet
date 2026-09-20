@@ -97,7 +97,7 @@ menu "epet configuration"
 
     config EPET_SHAKE_HOLD_MS
         int "How long the shaking must continue to count (ms)"
-        default 2000
+        default 1000
         range 0 10000
         depends on EPET_SHAKE_WAKE
         help

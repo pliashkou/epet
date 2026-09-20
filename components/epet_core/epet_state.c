@@ -89,6 +89,8 @@ static void reset_stats(epet_t *p)
 {
     epet_bus_t *bus = p->bus;
     const epet_species_t *sp = p->species;
+    uint32_t revive_ms = p->revive_hold_ms;
+    uint32_t blank_ms  = p->display_timeout_ms;
     *p = (epet_t){
         .hunger    = 20.0f,
         .happiness = 80.0f,
@@ -100,8 +102,11 @@ static void reset_stats(epet_t *p)
         .display_on = true,
         .idle_ms    = 0,
         .display_timeout_ms = EPET_DISPLAY_TIMEOUT_MS_DEFAULT,
+        .revive_hold_ms     = EPET_REVIVE_HOLD_MS_DEFAULT,
     };
     p->bus = bus;
+    if (revive_ms) p->revive_hold_ms = revive_ms;
+    if (blank_ms)  p->display_timeout_ms = blank_ms;
     (void)sp;
     /* A birth is a new creature: roll its class from every installed
      * module's characters. The CLASS page can still override afterwards, but
@@ -124,8 +129,14 @@ static void reset_stats(epet_t *p)
 
 void epet_init(epet_t *p)
 {
-    p->bus = NULL;          /* reset_stats preserves whatever is here */
+    /* reset_stats() PRESERVES these across a rebirth, which means it reads
+     * them before clearing the struct. On a first call that would be
+     * uninitialised stack, so clear every preserved field here first --
+     * a stray value once made the death screen ask for a 180 second shake. */
+    p->bus = NULL;
     p->species = NULL;
+    p->revive_hold_ms = 0;
+    p->display_timeout_ms = 0;
     reset_stats(p);         /* rolls the class and starts the birth pose */
 }
 
@@ -269,6 +280,9 @@ uint32_t epet_update(epet_t *p, uint32_t dt_ms,
     }
 
     if (!p->alive) {
+        /* Covers every route into death: dying now, loading a dead save, or
+         * a module removing the class out from under a corpse. */
+        epet_actor_ensure(&p->actor, EPET_POSE_DEAD);
         epet_actor_tick(&p->actor, dt_ms);
         return surviving;
     }
@@ -343,6 +357,7 @@ uint32_t epet_update(epet_t *p, uint32_t dt_ms,
     if (p->health <= 0.0f) {
         p->alive  = false;
         p->asleep = false;
+        epet_actor_play(&p->actor, EPET_POSE_DEAD, 0);
         emit(p, EPET_EV_DIED, (int32_t)(p->age_ms / 1000u), 0);
     }
 

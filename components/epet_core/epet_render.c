@@ -6,19 +6,21 @@
 /* Main screen: status panel across the top, scrolling menu down the left,
  * the pet in the remaining area. Pages draw their own screens instead. */
 
-#define PANEL_H   46
+#define PANEL_H   18
 #define PET_CX    (EPET_W / 2)
 /* Sprites carry headroom above the body (SPROUT's leaf), so the centre
  * sits lower than the visual middle to keep the feet on the ground. */
 #define PET_CY    156
 #define PET_R     44
 
-static void stat_bar(uint16_t *fb, int x, int y, const char *label,
-                     float pct, bool invert)
+/* One line for all five needs. At 240px the labels have to be single
+ * letters -- the STATS page carries the full names and numbers. */
+static void stat_cell(uint16_t *fb, int x, const char *letter,
+                      float pct, bool invert)
 {
     float shown = invert ? (100.0f - pct) : pct;
-    epet_text(fb, x, y, label, EPET_C_WHITE, 1);
-    epet_bar(fb, x + 26, y, 78, 7, shown, epet_level_colour(shown));
+    epet_text(fb, x, 5, letter, EPET_C_WHITE, 1);
+    epet_bar(fb, x + 7, 5, 25, 7, shown, epet_level_colour(shown));
 }
 
 static void draw_pet(uint16_t *fb, const epet_t *p, epet_mood_t mood)
@@ -33,10 +35,8 @@ static void draw_pet(uint16_t *fb, const epet_t *p, epet_mood_t mood)
     /* soft contact shadow so the sprite is not floating */
     epet_shade(fb, cx - 30, cy + 40, 60, 7, EPET_C_BLACK, 60);
 
-    if (mood == EPET_MOOD_DEAD) {
-        epet_actor_draw_tinted(&p->actor, fb, cx, cy, EPET_RGB565(120, 120, 130), 220);
-        return;
-    }
+    /* The dead pose has its own artwork -- a slump with crossed eyes and a
+     * departing spirit -- so it is drawn normally rather than tinted grey. */
     epet_actor_draw(&p->actor, fb, cx, cy);
 
     if (mood == EPET_MOOD_ASLEEP) {
@@ -69,20 +69,44 @@ void epet_render_main(const epet_ui_t *ui, const epet_t *p, uint16_t *fb)
 
     /* status panel first; the menu overlay is drawn last so it floats on top */
     epet_rect(fb, 0, 0, EPET_W, PANEL_H, EPET_C_PANEL);
-    stat_bar(fb, 6,   5, "FED", p->hunger, true);
-    stat_bar(fb, 6,  16, "JOY", p->happiness, false);
-    stat_bar(fb, 6,  27, "PEP", p->energy, false);
-    stat_bar(fb, 122, 5, "WSH", p->hygiene, false);
-    stat_bar(fb, 122, 16, "HP", p->health, false);
-    epet_text(fb, 122, 27, epet_mood_name(mood), EPET_C_WHITE, 1);
-    epet_number(fb, 190, 27, (int)(p->age_ms / 1000u), EPET_C_WHITE, 1);
-    epet_text(fb, 220, 27, "S", EPET_C_WHITE, 1);
+    stat_cell(fb, 3,   "F", p->hunger, true);      /* fed, not hungry */
+    stat_cell(fb, 39,  "J", p->happiness, false);
+    stat_cell(fb, 75,  "P", p->energy, false);
+    stat_cell(fb, 111, "W", p->hygiene, false);
+    stat_cell(fb, 147, "H", p->health, false);
+
+    /* mood right-aligned against the age, so neither jumps as they change */
+    const char *mn = epet_mood_name(mood);
+    epet_text(fb, 182, 5, mn, EPET_C_WHITE, 1);
+    epet_number(fb, 216, 5, (int)(p->age_ms / 1000u), EPET_C_DIM, 1);
 
     if (mood == EPET_MOOD_DEAD) {
-        epet_rect(fb, 54, 108, EPET_W - 68, 46, EPET_C_PANEL);
-        epet_frame(fb, 54, 108, EPET_W - 68, 46, 2, EPET_C_BAD);
-        epet_text(fb, 74, 116, "GONE", EPET_C_BAD, 2);
-        epet_text(fb, 64, 138, "REVIVE IN STATS", EPET_C_WHITE, 1);
+        /* Centred on the panel, and it says what to actually do. The figure
+         * comes from the pet rather than a constant here, because the hold
+         * is a platform setting. */
+        const int bw = 188, bh = 58;
+        const int bx = (EPET_W - bw) / 2, by = (EPET_H - bh) / 2;
+        epet_shade(fb, bx, by, bw, bh, EPET_C_BLACK, 205);
+        epet_frame(fb, bx, by, bw, bh, 2, EPET_C_BAD);
+
+        int tw = epet_text_width("GONE", 2);
+        epet_text(fb, (EPET_W - tw) / 2, by + 10, "GONE", EPET_C_BAD, 2);
+
+        /* "SHAKE 5S TO RESTART", laid out in pieces so it stays centred
+         * whatever the number is. */
+        uint32_t secs = (p->revive_hold_ms + 999u) / 1000u;
+        if (secs < 1) secs = 1;
+        const char *pre = "SHAKE ", *post = "S TO RESTART";
+        int digits = 1;
+        for (uint32_t t = secs; t >= 10; t /= 10) digits++;
+        int total = epet_text_width(pre, 1) + digits * 6 +
+                    epet_text_width(post, 1);
+        int tx = (EPET_W - total) / 2, ty = by + 36;
+        epet_text(fb, tx, ty, pre, EPET_C_WHITE, 1);
+        tx += epet_text_width(pre, 1);
+        epet_number(fb, tx, ty, (int)secs, EPET_C_GOOD, 1);
+        tx += digits * 6;
+        epet_text(fb, tx, ty, post, EPET_C_WHITE, 1);
     }
 
     if (ui) epet_ui_render_menu(ui, fb);

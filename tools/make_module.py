@@ -41,7 +41,11 @@ def pad(s, n):
 
 
 def rgb565(r, g, b):
-    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+    """Panel-ready RGB565: most-significant byte first. A pack's palettes
+    are stored in the same order the framebuffer uses, so the device never
+    reorders bytes at runtime."""
+    v = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+    return ((v & 0xFF) << 8) | (v >> 8)
 
 
 # ---- the character: SPARK, a little flame -------------------------------
@@ -71,6 +75,14 @@ def frame(cy=24, rx=15, ry=15, eye="open", mth="flat", spread=8, feet=True, fx=N
     return cv
 
 
+def smoke(height):
+    def fx(cv):
+        y = 16 - height + BODY_DY
+        cv.disc(26, y, 2, 7)
+        cv.disc(27, y - 4, 1, 7)
+    return fx
+
+
 def embers(cv):
     for (x, y, r) in ((8, 14 + BODY_DY, 1), (35, 17 + BODY_DY, 1), (31, 8 + BODY_DY, 2)):
         cv.disc(x, y, r, 8)
@@ -90,8 +102,18 @@ POSES = {
               (frame(cy=25, rx=16, ry=14, eye="happy", mth="smile"), 200)],
     "sad":   [(frame(cy=27, rx=16, ry=12, eye="sad", mth="frown"), 700),
               (frame(cy=28, rx=17, ry=11, eye="sad", mth="frown"), 700)],
+    # A flame that has gone out: flattened, crossed, with the last smoke
+    # curling away. Its own pose, not the idle frame greyed.
+    "dead":  [(frame(cy=31, rx=17, ry=8, eye="dead", mth="flat",
+                     spread=8, feet=False, fx=smoke(0)), 520),
+              (frame(cy=31, rx=17, ry=8, eye="dead", mth="flat",
+                     spread=8, feet=False, fx=smoke(6)), 520),
+              (frame(cy=32, rx=18, ry=7, eye="dead", mth="flat",
+                     spread=8, feet=False, fx=smoke(12)), 520),
+              (frame(cy=32, rx=18, ry=7, eye="dead", mth="flat",
+                     spread=8, feet=False), 900)],
 }
-POSE_ORDER = ["idle", "birth", "happy", "sad"]
+POSE_ORDER = ["idle", "birth", "happy", "sad", "dead"]
 
 SPARK_PAL = [0, rgb565(60, 20, 10), rgb565(255, 140, 40), rgb565(255, 220, 110),
              rgb565(200, 80, 20), 0xFFFF, rgb565(40, 15, 10), rgb565(70, 25, 15),
@@ -447,7 +469,7 @@ def build():
         for cv, hold in POSES[pname]:
             keys.append((len(frames), hold))
             frames.append(cv)
-        poses.append((pname, pname in ("idle", "sad"), keys))
+        poses.append((pname, pname in ("idle", "sad", "dead"), keys))
 
     bg_idx = len(frames)
     frames.append(bg_hearth())

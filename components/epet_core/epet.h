@@ -12,10 +12,15 @@
 /* Blank the display after this much time with no button activity.
  * 0 disables the timeout. Platform layers may override it after epet_init(). */
 #define EPET_DISPLAY_TIMEOUT_MS_DEFAULT 30000
+/* How long a dead pet must be shaken to start a new one. The core does not
+ * do the shaking -- it only needs the figure so the death screen can say
+ * what to do. Platforms overwrite it with their own setting. */
+#define EPET_REVIVE_HOLD_MS_DEFAULT 5000
 
-/* Framebuffer is native-endian RGB565. Platform layers convert on flush. */
+/* Framebuffer holds panel-ready RGB565 (MSB first); see epet_draw.h. */
 #define EPET_RGB(r, g, b) \
-    ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
+    ((uint16_t)__builtin_bswap16( \
+        (uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3))))
 
 /* Buttons are named by physical position, not meaning: two down the left of
  * the screen, two down the right. What each one DOES lives in one place,
@@ -69,6 +74,7 @@ typedef struct {
     bool     display_on;
     uint32_t idle_ms;
     uint32_t display_timeout_ms;
+    uint32_t revive_hold_ms;   /* shown on the death screen */
 
     /* Event bus, optional. NULL means events are simply not raised, so the
      * core still works standalone (tests, minimal builds). */

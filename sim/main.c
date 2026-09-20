@@ -42,7 +42,19 @@
 
 #define STEP_MS   33
 
-static uint16_t fb[EPET_W * EPET_H];        /* the pet's panel */
+static uint16_t fb[EPET_W * EPET_H];        /* the pet's panel, panel-ready */
+static uint16_t fb_native[EPET_W * EPET_H]; /* byte-swapped for SDL/BMP */
+
+/* The core stores colours in the ST7789's byte order so the firmware never
+ * reorders anything. Desktops want native order, so the swap happens here --
+ * one pass over 57600 pixels, microseconds on a host CPU, against 9.5 ms on
+ * the MCU. */
+static void to_native(void)
+{
+    for (int i = 0; i < EPET_W * EPET_H; i++) {
+        fb_native[i] = (uint16_t)((fb[i] >> 8) | (fb[i] << 8));
+    }
+}
 static uint16_t chrome[CHROME_W * CHROME_H];/* whole mock device */
 
 /* ---- chrome drawing (own stride, so epet_draw's helpers do not apply) -- */
@@ -112,9 +124,11 @@ static void draw_chrome(const bool down[EPET_BTN_COUNT], bool panel_lit)
     }
 
     /* blit the pet panel into the recess */
+    to_native();
     for (int y = 0; y < EPET_H; y++) {
         for (int x = 0; x < EPET_W; x++) {
-            chrome[y * CHROME_W + SCREEN_X + x] = panel_lit ? fb[y * EPET_W + x] : 0;
+            chrome[y * CHROME_W + SCREEN_X + x] =
+                panel_lit ? fb_native[y * EPET_W + x] : 0;
         }
     }
 }
@@ -316,7 +330,8 @@ static int run_headless(const char *shots, const char *outdir, int speed,
                 draw_chrome((bool[EPET_BTN_COUNT]){false}, w.pet.display_on);
                 rc = save_bmp(path, chrome, CHROME_W, CHROME_H, CHROME_W);
             } else {
-                rc = save_bmp(path, fb, EPET_W, EPET_H, EPET_W);
+                to_native();
+                rc = save_bmp(path, fb_native, EPET_W, EPET_H, EPET_W);
             }
             if (rc) { fprintf(stderr, "cannot write %s\n", path); return 1; }
             printf("%s  hunger=%.0f joy=%.0f pep=%.0f wsh=%.0f hp=%.0f %s%s%s\n",

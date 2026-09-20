@@ -164,11 +164,20 @@ uint16_t epet_mix(uint16_t under, uint16_t over, uint8_t alpha)
 {
     if (alpha == 0)   return under;
     if (alpha == 255) return over;
+
+    /* Pixels are stored panel-ready (byte-swapped), so unpack before touching
+     * the channels and repack afterwards. This is the only place that pays
+     * for the storage order, and it runs on blended pixels only -- a few
+     * thousand per frame for the menu overlay, against the 57600 the old
+     * whole-framebuffer swap touched every time. */
+    uint16_t u = __builtin_bswap16(under);
+    uint16_t o = __builtin_bswap16(over);
+
     uint32_t ia = 255u - alpha;
-    uint32_t r = (((under >> 11) & 0x1F) * ia + ((over >> 11) & 0x1F) * alpha) / 255u;
-    uint32_t g = (((under >> 5)  & 0x3F) * ia + ((over >> 5)  & 0x3F) * alpha) / 255u;
-    uint32_t b = (( under        & 0x1F) * ia + ( over        & 0x1F) * alpha) / 255u;
-    return (uint16_t)((r << 11) | (g << 5) | b);
+    uint32_t r = (((u >> 11) & 0x1F) * ia + ((o >> 11) & 0x1F) * alpha) / 255u;
+    uint32_t g = (((u >> 5)  & 0x3F) * ia + ((o >> 5)  & 0x3F) * alpha) / 255u;
+    uint32_t b = (( u        & 0x1F) * ia + ( o        & 0x1F) * alpha) / 255u;
+    return __builtin_bswap16((uint16_t)((r << 11) | (g << 5) | b));
 }
 
 void epet_shade(uint16_t *fb, int x, int y, int w, int h, uint16_t c, uint8_t alpha)
@@ -197,6 +206,37 @@ void epet_shade_disc(uint16_t *fb, int cx, int cy, int r, uint16_t c, uint8_t al
             *px = epet_mix(*px, c, alpha);
         }
     }
+}
+
+#include <string.h>
+
+const epet_frame_t *epet_icon(const char *name)
+{
+    for (uint8_t i = 0; i < EPET_ICON_COUNT; i++) {
+        if (strcmp(EPET_ICONS[i].name, name) == 0) return EPET_ICONS[i].frame;
+    }
+    return 0;
+}
+
+void epet_icon_draw(uint16_t *fb, int cx, int cy, const epet_frame_t *f,
+                    bool selected)
+{
+    if (!f) return;
+    /* Two palettes, one per state. Selected reads bright and solid;
+     * unselected sits back without becoming illegible. */
+    static const epet_palette_t SEL = { {
+        0,
+        EPET_RGB565(255, 255, 255),   /* body      */
+        EPET_RGB565(150, 200, 245),   /* secondary */
+        EPET_RGB565( 70, 130, 200),   /* highlight */
+    } };
+    static const epet_palette_t DIM = { {
+        0,
+        EPET_RGB565(132, 146, 166),
+        EPET_RGB565( 92, 104, 122),
+        EPET_RGB565( 62, 72,  88),
+    } };
+    epet_blit_centred(fb, cx, cy, f, selected ? &SEL : &DIM, 1);
 }
 
 uint16_t epet_level_colour(float pct)

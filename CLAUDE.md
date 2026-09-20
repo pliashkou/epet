@@ -314,6 +314,30 @@ pixel on the outermost row or column, and `tests/test_character.c` asserts
 the same for every frame of every pose. If you enlarge a pose and the build
 stops with "touches the canvas edge", raise `H` or lower `BODY_DY`.
 
+#### Colour storage
+
+Colours are stored **panel-ready**: RGB565, most-significant byte first, the
+order the ST7789 reads. `EPET_RGB565` byte-swaps at compile time.
+
+The framebuffer used to hold native-endian values and the firmware swapped all
+57600 pixels before every transfer -- 9.5 ms per frame, 38% of the frame
+budget, purely reordering bytes. Storing them panel-ready deletes that pass and
+lets the device render straight into the DMA buffer, which also merged two
+115 KB framebuffers into one. The simulator pays the swap instead, once per
+frame when uploading to SDL, where it is free.
+
+Only code that DECOMPOSES a colour cares: `epet_mix()` unpacks and repacks.
+Everything else just moves opaque values around.
+
+Two traps this created:
+
+- **Every colour literal must go through the macro.** The night tint in
+  `gen_sprites.py` was a raw `0x18CE` and stayed in the old order -- the only
+  colour that did, and it only showed while the pet slept.
+- **Packs built before the change render with red and blue transposed.**
+  Orange reads back as light cyan. There is deliberately no version check for
+  this, so rebuild packs with `tools/make_module.py` after pulling.
+
 #### Artwork
 
 `components/epet_core/epet_sprites.c` is GENERATED. Edit the shapes in
@@ -526,6 +550,23 @@ Decisions worth keeping:
   flushes just before entering light sleep, since the next wake may be
   minutes away.
 
+### The backlight cannot be switched off
+
+Not in software, on this board revision. The vendor's factory program drives
+GPIO4 as the backlight; driving it here changes nothing. A sweep of GPIO4 plus
+17 other unassigned pins, both polarities, with the pin number drawn on the
+panel so it could be read from the device, never dimmed it. It is wired to the
+rail. (The same vendor header also claimed `lcd_bl 20`, which is wrong too.)
+
+`lcd_set_power(false)` therefore **paints the framebuffer black before turning
+the controller off**. The panel still emits, but it is a dark rectangle rather
+than a glowing picture. That is the only dimming available; switching it
+properly needs a transistor on a spare GPIO.
+
+Do not spend another afternoon on `gpio_hold_en()`, `gpio_sleep_sel_dis()` or
+the sleep GPIO workaround for this. Probe whether the pin does anything at all
+first -- that test takes one flash.
+
 ### Shake to wake
 
 The QMI8658 IMU is on **I2C SDA 47 / SCL 48, address 0x6B**. Configured by
@@ -631,6 +672,7 @@ Three suites, all against `epet_core` directly -- no SDL, no hardware:
   menu and character-pool effects, registry limits
 - `tests/test_save.c` -- save round-trip, corruption and truncation, a class
   removed between runs, module-list restore, autosave timing
+- `tests/test_character.c` also covers the dead pose
 - `tests/test_vm.c` -- what the VM refuses to load and what it refuses to let
   a loaded page do: bad opcodes, wild jumps, stack underflow, missing syscall
   arguments, runaway loops

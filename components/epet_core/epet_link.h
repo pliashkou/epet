@@ -32,6 +32,7 @@
  *   dev : #OK <id> | #ERR <reason>
  *
  *   host: #PING          dev: #PONG <protocol version>
+ *   host: #NEWPET        dev: #OK <class>   discard the pet, hatch a new one
  *
  * Feed received bytes to epet_link_feed(). Replies go out through the writer
  * the platform installed. */

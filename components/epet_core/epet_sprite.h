@@ -42,6 +42,7 @@ typedef struct {
 #define EPET_POSE_BIRTH "birth"
 #define EPET_POSE_HAPPY "happy"
 #define EPET_POSE_SAD   "sad"
+#define EPET_POSE_DEAD  "dead"
 
 /* ---- blitting -------------------------------------------------------- */
 

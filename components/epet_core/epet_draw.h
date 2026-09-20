@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "epet_sprite.h"
 
 /* Drawing primitives, available to pages so a sub-program can render whatever
  * UI or animation it likes straight into the framebuffer.
@@ -8,8 +9,20 @@
  * The framebuffer is native-endian RGB565, EPET_W * EPET_H, row-major.
  * Every primitive clips to the screen, so out-of-range coordinates are safe. */
 
+/* Colours are stored in the byte order the ST7789 wants: RGB565,
+ * most-significant byte first.
+ *
+ * The framebuffer used to hold native-endian values and the firmware swapped
+ * all 57600 pixels before every transfer -- 9.5 ms per frame, 38% of the
+ * frame budget, purely to reorder bytes. Storing them panel-ready deletes
+ * that pass entirely and lets the device render straight into the DMA
+ * buffer. The cost moves to the simulator, which swaps once per frame when
+ * uploading to SDL, where it is free.
+ *
+ * Only code that DECOMPOSES a colour has to care: see epet_mix(). */
 #define EPET_RGB565(r, g, b) \
-    ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
+    ((uint16_t)__builtin_bswap16( \
+        (uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3))))
 
 /* Shared palette. Pages may of course use their own colours. */
 #define EPET_C_BLACK   EPET_RGB565(0, 0, 0)
@@ -55,6 +68,23 @@ const uint8_t *epet_font_glyph(char ch);
 uint16_t epet_mix(uint16_t under, uint16_t over, uint8_t alpha);
 void epet_shade(uint16_t *fb, int x, int y, int w, int h, uint16_t c, uint8_t alpha);
 void epet_shade_disc(uint16_t *fb, int cx, int cy, int r, uint16_t c, uint8_t alpha);
+
+/* ---- menu icons ------------------------------------------------------
+ * Pixel art rather than composed shapes: circles and rectangles give lumpy
+ * silhouettes at 20x20. Index 1 is the body, 2 a secondary tone, 3 a
+ * highlight, each coloured per selection state. */
+typedef struct {
+    const char         *name;
+    const epet_frame_t *frame;
+} epet_icon_t;
+
+extern const epet_icon_t EPET_ICONS[];
+extern const uint8_t     EPET_ICON_COUNT;
+
+const epet_frame_t *epet_icon(const char *name);
+/* Draw one centred, tinted for its state. */
+void epet_icon_draw(uint16_t *fb, int cx, int cy, const epet_frame_t *f,
+                    bool selected);
 
 void epet_bar(uint16_t *fb, int x, int y, int w, int h, float pct, uint16_t c);
 uint16_t epet_level_colour(float pct);

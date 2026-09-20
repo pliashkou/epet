@@ -89,6 +89,12 @@ def eyes(cv, cx, ey, state, spread=9):
                 cv.put(x - 4 + i, ey + 3 - i, 6)
                 cv.put(x + 4 - i, ey + 2 - i, 6)
                 cv.put(x + 4 - i, ey + 3 - i, 6)
+        elif state == "dead":            # crossed out
+            for i in range(-4, 5):
+                cv.put(x + i, ey + i, 6)
+                cv.put(x + i + 1, ey + i, 6)
+                cv.put(x + i, ey - i, 6)
+                cv.put(x + i + 1, ey - i, 6)
         elif state == "sad":             # drooping
             cv.disc(x, ey + 1, 4, 5)
             cv.disc(x + side, ey + 2, 2, 6)
@@ -166,6 +172,248 @@ def sparkle(cv):
 def tear(cv):
     cv.ellipse(10, 24 + BODY_DY, 2, 3, 8)
     cv.ellipse(34, 26 + BODY_DY, 2, 3, 8)
+
+
+# ---- menu icons ---------------------------------------------------------
+# Drawn as pixel art rather than composed from circles: shape primitives give
+# lumpy silhouettes at this size, and every pixel matters on a 20x20 glyph.
+#   '#' the icon's body      '+' a secondary tone      'o' a highlight
+# The three map to palette indices 1/2/3, coloured per selection state.
+
+ICON_W = ICON_H = 20
+
+ICONS = {
+    "feed": [                       # bowl of something warm
+        "....................",
+        "........++..........",
+        ".......+..+.........",
+        "........++..........",
+        "......+....+........",
+        ".......+..+.........",
+        "....................",
+        "..................o.",
+        ".oooooooooooooooooo.",
+        ".####################"[:20],
+        ".##################.",
+        "..################..",
+        "..##############....",
+        "...############.....",
+        "....##########......",
+        ".....########.......",
+        "......######........",
+        ".......####.........",
+        "....................",
+        "....................",
+    ],
+    "play": [                       # ball with a clear seam and a shine
+        "....................",
+        "....................",
+        "......######........",
+        "....##########......",
+        "...###oo########....",
+        "..####oo#########...",
+        "..###############...",
+        ".#######++#########.",
+        ".#####++++++#######.",
+        ".####++####++######.",
+        ".###++######++#####.",
+        ".##++########++####.",
+        ".#++##########++###.",
+        "..###############...",
+        "..###############...",
+        "...#############....",
+        "....###########.....",
+        "......#######.......",
+        "....................",
+        "....................",
+    ],
+    "wash": [                       # droplet with a shine
+        "....................",
+        ".........#..........",
+        "........###.........",
+        "........###.........",
+        ".......#####........",
+        ".......#####........",
+        "......#######.......",
+        "......##oo###.......",
+        ".....###oo#####.....",
+        ".....####o######....",
+        "....############....",
+        "....############....",
+        "....############....",
+        ".....##########.....",
+        ".....##########.....",
+        "......########......",
+        ".......######.......",
+        "........####........",
+        "....................",
+        "....................",
+    ],
+    "stats": [                      # bar chart
+        "....................",
+        "....................",
+        "................###.",
+        "................###.",
+        "................###.",
+        ".........###....###.",
+        ".........###....###.",
+        ".........###....###.",
+        "..###....###....###.",
+        "..###....###....###.",
+        "..###....###....###.",
+        "..###....###....###.",
+        "..###....###....###.",
+        "..###....###....###.",
+        "..###....###....###.",
+        "++++++++++++++++++++",
+        "....................",
+        "....................",
+        "....................",
+        "....................",
+    ],
+    "sleep": [                      # crescent moon and a star
+        "....................",
+        ".......#####....++..",
+        ".....#########..++..",
+        "....####....##......",
+        "...####......#..++..",
+        "..####..............",
+        "..####..............",
+        ".#####..............",
+        ".#####..............",
+        ".#####..............",
+        ".#####..........++..",
+        ".#####.........++++.",
+        "..####..........++..",
+        "..####..............",
+        "...####......#......",
+        "....####....##......",
+        ".....#########......",
+        ".......#####........",
+        "....................",
+        "....................",
+    ],
+    "class": [                      # two figures, one in front
+        "....................",
+        "....................",
+        "..++++......####....",
+        ".++++++....######...",
+        ".++++++....######...",
+        "..++++......####....",
+        "....................",
+        ".++++++++..########.",
+        "++++++++++##########",
+        "++++++++++##########",
+        "++++++++++##########",
+        "++++++++++##########",
+        ".++++++++..########.",
+        "..++++++....######..",
+        "....................",
+        "....................",
+        "....................",
+        "....................",
+        "....................",
+        "....................",
+    ],
+    "home": [                       # a little house
+        "....................",
+        "....................",
+        ".........##.........",
+        "........####........",
+        ".......######.......",
+        "......########......",
+        ".....##########.....",
+        "....############....",
+        "...##############...",
+        "..################..",
+        ".##################.",
+        "...##############...",
+        "...####......####...",
+        "...####......####...",
+        "...####.oooo.####...",
+        "...####.oooo.####...",
+        "...####.oooo.####...",
+        "...##############...",
+        "....................",
+        "....................",
+    ],
+    "mods": [                       # stacked blocks
+        "....................",
+        "....................",
+        "..################..",
+        "..################..",
+        "..#++++++++++++++#..",
+        "..################..",
+        "....................",
+        "..################..",
+        "..################..",
+        "..#++++++++++++++#..",
+        "..################..",
+        "....................",
+        "..################..",
+        "..################..",
+        "..#++++++++++++++#..",
+        "..################..",
+        "....................",
+        "....................",
+        "....................",
+        "....................",
+    ],
+    "about": [                      # info badge
+        "....................",
+        "......########......",
+        "....############....",
+        "...##############...",
+        "..################..",
+        "..######oooo######..",
+        ".#######oooo#######.",
+        ".#######oooo#######.",
+        ".##################.",
+        ".######oooooo######.",
+        ".########oooo######.",
+        ".########oooo######.",
+        "..#######oooo#####..",
+        "..#####oooooooo###..",
+        "...##############...",
+        "....############....",
+        "......########......",
+        "....................",
+        "....................",
+        "....................",
+    ],
+    "update": [                     # a beacon: solid core, two clean arcs
+        "....................",
+        "....................",
+        "..++............++..",
+        ".++..............++.",
+        "++....++####++....++",
+        "+....++......++....+",
+        "+...++........++...+",
+        "+..++...####...++..+",
+        "+..+...######...+..+",
+        "+..+...######...+..+",
+        "+..++...####...++..+",
+        "+...++........++...+",
+        "+....++......++....+",
+        "++....++####++....++",
+        ".++..............++.",
+        "..++............++..",
+        "....................",
+        "....................",
+        "....................",
+        "....................",
+    ],
+}
+
+
+def icon_canvas(rows):
+    cv = Canvas(ICON_W, ICON_H)
+    mapping = {"#": 1, "+": 2, "o": 3}
+    for y, row in enumerate(rows[:ICON_H]):
+        for x, ch in enumerate(row[:ICON_W]):
+            if ch in mapping:
+                cv.put(x, y, mapping[ch])
+    return cv
 
 
 # ---- what each creature leaves behind -----------------------------------
@@ -320,6 +568,27 @@ def build(body_fn):
         (frame(body_fn, cy=26, rx=17, ry=13, eye="sad", mth="frown"), 500),
     ]
 
+    # dead: slumped flat with crossed eyes, and a spirit drifting off.
+    # A distinct pose rather than a grey tint on the idle frame -- the shape
+    # is what reads as "gone" at this size, not the colour.
+    def wisp(height, fade):
+        def fx(cv):
+            y = 16 - height + BODY_DY
+            cv.disc(26, y, 3 - fade, 3)
+            cv.disc(27, y - 4, max(1, 2 - fade), 3)
+        return fx
+
+    poses["dead"] = [
+        (frame(body_fn, cy=30, rx=17, ry=9, eye="dead", mth="flat",
+               eye_y=27, mouth_y=34, fx=wisp(0, 0)), 520),
+        (frame(body_fn, cy=30, rx=17, ry=9, eye="dead", mth="flat",
+               eye_y=27, mouth_y=34, fx=wisp(6, 0)), 520),
+        (frame(body_fn, cy=31, rx=18, ry=8, eye="dead", mth="flat",
+               eye_y=28, mouth_y=35, fx=wisp(12, 1)), 520),
+        (frame(body_fn, cy=31, rx=18, ry=8, eye="dead", mth="flat",
+               eye_y=28, mouth_y=35), 900),
+    ]
+
     # birth: a speck that swells, wobbles and opens its eyes
     poses["birth"] = [
         (frame(body_fn, cy=32, rx=4, ry=4, eye="closed", mth="flat",
@@ -366,10 +635,22 @@ def emit_frame(name, cv, out):
     out.append("")
 
 
+def rgb565(r, g, b):
+    """Native-order RGB565; swap16() puts it in panel order."""
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+
+def swap16(v):
+    """Palettes are stored panel-ready (MSB first), like every other colour;
+    see EPET_RGB565 in epet_draw.h."""
+    return ((v & 0xFF) << 8) | ((v >> 8) & 0xFF)
+
+
 def main():
     out = []
     out.append("/* GENERATED by tools/gen_sprites.py -- do not edit by hand. */")
     out.append('#include "epet_species.h"')
+    out.append('#include "epet_draw.h"')
     out.append("extern const epet_species_t *const epet_core_species[];")
     out.append("extern const uint8_t epet_core_species_count;")
     out.append("")
@@ -385,7 +666,7 @@ def main():
          (0.75, 1.0, 0.85, 1.35)),
     ]
 
-    pose_order = ["idle", "birth", "happy", "sad"]
+    pose_order = ["idle", "birth", "happy", "sad", "dead"]
 
     for ident, body_fn, disp, blurb, pal, temper in species:
         # backdrops first
@@ -399,12 +680,18 @@ def main():
                     "backdrop %s/%s has %d transparent pixels" % (ident, bname, holes))
             emit_frame("bg_%s_%d" % (ident, bi), bcv, out)
             out.append("static const epet_palette_t BP_%s_%d = { { %s } };"
-                       % (ident, bi, ", ".join("0x%04X" % c for c in bpal)))
+                       % (ident, bi,
+                          ", ".join("0x%04X" % swap16(c) for c in bpal)))
             out.append("")
         out.append("static const epet_backdrop_t BD_%s[] = {" % ident)
         for bi, (bname, bfn, bpal) in enumerate(BACKDROPS[ident]):
+            # Every colour is stored panel-ready, this one included -- it is
+            # easy to miss because it is the only literal colour here that is
+            # not part of a palette.
             out.append('    { "%s", &F_bg_%s_%d, &BP_%s_%d, %d, 0, 0, 198, '
-                       '0x18CE, 150 },' % (bname, ident, bi, ident, bi, BG_SCALE))
+                       '0x%04X, 150 },'
+                       % (bname, ident, bi, ident, bi, BG_SCALE,
+                          swap16(rgb565(24, 30, 72))))
         out.append("};")
         out.append("")
 
@@ -427,7 +714,7 @@ def main():
 
         out.append("static const epet_pose_t P_%s[] = {" % ident)
         for pname in pose_order:
-            loop = "true" if pname in ("idle", "sad") else "false"
+            loop = "true" if pname in ("idle", "sad", "dead") else "false"
             out.append('    { "%s", K_%s_%s, %d, %s },'
                        % (pname, ident, pname, len(poses[pname]), loop))
         out.append("};")
@@ -436,7 +723,8 @@ def main():
         out.append("static const epet_species_t S_%s = {" % ident)
         out.append('    .name = "%s",' % disp)
         out.append('    .blurb = "%s",' % blurb)
-        out.append("    .palette = { { %s } }," % ", ".join("0x%04X" % c for c in pal))
+        out.append("    .palette = { { %s } },"
+                   % ", ".join("0x%04X" % swap16(c) for c in pal))
         out.append("    .poses = P_%s," % ident)
         out.append("    .n_poses = %d," % len(pose_order))
         out.append("    .scale = %d," % SCALE)
@@ -446,6 +734,16 @@ def main():
         out.append("    .temper = { %.2ff, %.2ff, %.2ff, %.2ff }," % temper)
         out.append("};")
         out.append("")
+
+    # menu icons, shared by every page
+    for name, rows in sorted(ICONS.items()):
+        emit_frame("icon_%s" % name, icon_canvas(rows), out)
+    out.append("const epet_icon_t EPET_ICONS[] = {")
+    for name in sorted(ICONS):
+        out.append('    { "%s", &F_icon_%s },' % (name, name))
+    out.append("};")
+    out.append("const uint8_t EPET_ICON_COUNT = %d;" % len(ICONS))
+    out.append("")
 
     out.append("/* Consumed by the core module in epet_module_core.c. */")
     out.append("const epet_species_t *const epet_core_species[] = {")

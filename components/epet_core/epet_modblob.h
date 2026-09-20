@@ -9,6 +9,10 @@
  * A pack carries CHARACTERS (frames, palettes, poses, backdrops, temperament)
  * and DECLARATIVE PAGES (see epet_dynpage.h). It cannot carry code.
  *
+ * Palette entries are PANEL-READY RGB565 (most-significant byte first),
+ * matching EPET_RGB565 in epet_draw.h. Rebuild any pack made before that
+ * changed -- native-order colours render with red and blue transposed.
+ *
  * Layout, all little-endian, no padding, no alignment assumptions:
  *
  *   header 64 bytes
